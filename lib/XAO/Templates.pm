@@ -24,7 +24,7 @@ use XAO::Utils;
 use XAO::Projects qw(get_current_project_name);
 
 use vars qw($VERSION);
-($VERSION)=('$Id: Templates.pm,v 1.4 2002/05/19 20:00:01 am Exp $' =~ /(\d+\.\d+)/);
+($VERSION)=('$Id: Templates.pm,v 1.7 2003/10/29 01:12:49 am Exp $' =~ /(\d+\.\d+)/);
 
 ##
 # Cache for templates.
@@ -37,20 +37,35 @@ use vars qw(%cache);
 sub get (%) {
     my %args=@_;
     my $path=$args{path};
+
     my $sitename=get_current_project_name();
+
     if($path =~ /\.\.\//) {
         eprint "Bad template path -- sitename=",$sitename,", path=$path";
         return undef;
     }
 
     ##
-    # Checking in the memory cache
+    # Checking in the memory cache. If there is a record, but it's
+    # 'undef' then the template does not exist in that site's local
+    # tree.
     #
-    return $cache{$sitename}->{$path} if exists($cache{$sitename}) && exists($cache{$sitename}->{$path});
-    return $cache{'/'}->{$path} if exists($cache{'/'}) && exists($cache{'/'}->{$path});
+    if(!defined $sitename) {
+        return $cache{'/'}->{$path} if exists($cache{'/'}) && exists($cache{'/'}->{$path});
+    }
+    elsif(exists $cache{$sitename} && exists $cache{$sitename}->{$path}) {
+        my $template=$cache{$sitename}->{$path};
+        return $template if defined $template;
+
+        ##
+        # Otherwise we know we already tried, but failed and it's safe
+        # to return the one from the system cache.
+        #
+        return $cache{'/'}->{$path} if exists($cache{'/'}) && exists($cache{'/'}->{$path});
+    }
 
     ##
-    # Retrieving from disk.
+    # Retrieving from disk. We only get here if cache was a miss.
     #
     my $system;
     my $tpath;
@@ -63,63 +78,110 @@ sub get (%) {
         $system=1;
     }
     local *F;
-    return undef unless open(F,$tpath);
-    local $/;
-    my $text=<F>;
-    close(F);
-    dprint "Retrieving template from $tpath";
+    my $text;
+    if(open(F,$tpath)) {
+        local $/;
+        $text=<F>;
+        close(F);
+    }
 
     ##
     # Storing into cache.
     #
-    $cache{$system ? '/' : $sitename}->{$path}=$text if length($text)<50000;
-    $text;
+    if(!defined $text) {
+        $cache{'/'}->{$path}=undef;
+        $cache{$sitename}->{$path}=undef if defined $sitename;
+    }
+    elsif(length($text) < 100000) {
+        if($system) {
+            $cache{'/'}->{$path}=$text;
+            $cache{$sitename}->{$path}=undef if defined $sitename;
+        }
+        else {
+            $cache{$sitename}->{$path}=$text;
+        }
+    }
+
+    return $text;
 }
 
-##
-# Checking the existence of given template.
-#
-sub check (%) {
-    my %args=@_;
-    my $path=$args{path};
-    my $sitename=get_current_project_name();
+###############################################################################
+
+=item filename ($;$)
+
+Checks if given path (first argument) exists and returns template's
+filename if it does and 'undef' if there is no template. Optional second
+argument refers to a sitename (project name), by default the current
+active project name is used.
+
+=cut
+
+sub filename ($;$) {
+    my ($path,$sitename)=@_;
+
+    $sitename||=get_current_project_name();
+
     if($path =~ /\.\.\//) {
         eprint "Bad template path -- sitename=",$sitename,", path=$path";
         return 0;
     }
-    return 0 if !defined($path) || $path eq '';
-    return 1 if defined($sitename) && -r "$projectsdir/$sitename/templates/$path";
-    return 1 if -r "$homedir/templates/$path";
-    return 0;
+
+    return undef if !defined($path) || $path eq '';
+
+    if(defined $sitename) {
+        my $tn="$projectsdir/$sitename/templates/$path";
+        return $tn if -f $tn && -r _;
+    }
+
+    my $tn="$homedir/templates/$path";
+    return $tn if -f $tn && -r _;
+
+    return undef;
 }
 
-##
+###############################################################################
+
+=item check (%)
+
+Deprecated method, do not use.
+
+=cut
+
+sub check (%) {
+    my %args=@_;
+    dprint "XAO::Templates::check - deprecated, use filename() instead";
+    return filename($args{path}) ? 1 : 0;
+}
+
+###############################################################################
+
 # Complete list of all available templates in random order.
 #
 # Returns list in array context and array reference in scalar context.
-#
-sub list (%)
-{ my %args=@_;
-  my $tpath;
-  my $sitename=get_current_project_name();
-  if(defined $sitename)
-   { $tpath="$projectsdir/$sitename/templates/";
-   }
-  if(! $tpath || ! -r $tpath)
-   { $tpath="$homedir/templates/";
-   }
-  if(! $tpath || ! -r $tpath)
-   { eprint "Templates::list - can't get list";
-     return wantarray ? () : undef;
-   }
-  local *F;
-  if(!open(F,"/usr/bin/find $tpath -type f |"))
-   { eprint "Templates::list - can't get list: $!\n";
-     return wantarray ? () : undef;
-   }
-  my @list=map { chomp; s/^$tpath//; $_ } <F>;
-  close(F);
-  wantarray ? @list : (@list ? \@list : undef);
+
+sub list (%) {
+    eprint "XAO::Templates::list - is not supported any more";
+    my %args=@_;
+    my $tpath;
+    my $sitename=get_current_project_name();
+    if(defined $sitename) {
+        $tpath="$projectsdir/$sitename/templates/";
+    }
+    if(! $tpath || ! -r $tpath) {
+        $tpath="$homedir/templates/";
+    }
+    if(! $tpath || ! -r $tpath) {
+        eprint "Templates::list - can't get list";
+        return wantarray ? () : undef;
+    }
+    local *F;
+    if(!open(F,"/usr/bin/find $tpath -type f |")) {
+        eprint "Templates::list - can't get list: $!\n";
+        return wantarray ? () : undef;
+    }
+    my @list=map { chomp; s/^$tpath//; $_ } <F>;
+    close(F);
+    wantarray ? @list : (@list ? \@list : undef);
 }
 
 ###############################################################################
@@ -128,6 +190,6 @@ __END__
 
 =head1 AUTHOR
 
-Copyright (c) 2000-2001 XAO Inc.
+Copyright (c) 2000-2003 XAO Inc.
 
 The author is Andrew Maltsev <am@xao.com>

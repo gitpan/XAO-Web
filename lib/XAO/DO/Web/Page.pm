@@ -269,7 +269,7 @@ Will convert '123<BR>234' into '123&lt;BR&gt;234'.
 
 Converts text for safe use in HTML query parameters. Mnemonic - (q)uery.
 
-Will convert '123 234' into '123+234'.
+Will convert '123 234' into '123%20234'.
 
 Example: <A HREF="test.html?name=<$VAR/q$>">Test '<$VAR/h$>'</A>
 
@@ -277,6 +277,11 @@ Example: <A HREF="test.html?name=<$VAR/q$>">Test '<$VAR/h$>'</A>
 
 The same as 'h' excepts that it translates empty string into
 '&nbsp;'. Suitable for inserting pieces of text into table cells.
+
+=item u
+
+The same as 'q'. Mnemonic - (U)RL, as it can be used to convert text for
+inclusion into URLs.
 
 =back
 
@@ -399,7 +404,7 @@ use Error qw(:try);
 use base XAO::Objects->load(objname => 'Atom');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Page.pm,v 1.22 2002/10/29 09:42:31 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Page.pm,v 1.25 2003/07/22 17:39:42 am Exp $ =~ /(\d+\.\d+)/);
 
 ##
 # Prototypes
@@ -581,8 +586,9 @@ sub display ($%) {
         }
 
         ##
-        # Safety conversion - q for query, h - for html, s - for nbsp'ced
-        # html, f - for tag fields, t - for text as is (default).
+        # Safety conversion - q for query, h - for html, s - for
+        # nbsp'ced html, f - for tag fields, u - for URLs, t - for text
+        # as is (default).
         #
         if(defined($text) && $itemflag && $itemflag ne 't') {
             if($itemflag eq 'h') {
@@ -596,6 +602,9 @@ sub display ($%) {
             }
             elsif($itemflag eq 'f') {
                 $text=XAO::Utils::t2hf($text)
+            }
+            elsif($itemflag eq 'u') {
+                $text=XAO::Utils::t2hq($text)
             }
         }
 
@@ -679,7 +688,7 @@ It will return a reference to the array of the following structure:
 Templates from disk files are cached for the lifetime of the process and
 are never re-parsed.
 
-Always returns with the correct array or throws an error.
+Always returns with a correct array or throws an error.
 
 =cut
 
@@ -730,6 +739,19 @@ sub parse ($%) {
     ##
     # Parsing. If a scalar is returned it is an indicator of an error.
     #
+    if($self->debug_check('show-parse')) {
+        if($path) {
+            dprint $self->{objname}."::parse - parsing path='$path'"
+        }
+        else {
+            my $te=substr($template,0,20);
+            $te=~s/\r/\\r/sg;
+            $te=~s/\n/\\n/sg;
+            $te=~s/\t/\\t/sg;
+            $te.='...' if length($template)>20;
+            dprint $self->{objname}."::parse - parsing inline template ($te)";
+        }
+    }
     my $page=XAO::PageSupport::parse($template);
     ref $page ||
         throw $self "parse - $page";
@@ -981,6 +1003,12 @@ sub siteconfig ($) {
 Returns base_url for secure or normal connection. Depends on parameter
 "secure" if it is set, or current state if it is not.
 
+If 'active' parameter is set then will return active URL, not the base
+one. In most practical cases active URL is the same as base URL except
+when your server is set up to answer for many domains. Base will stay
+at what is set in the site configuration and active will be the one
+taken from the Host: header.
+
 Examples:
 
  # Returns secure url in secure mode and normal
@@ -996,24 +1024,31 @@ Examples:
  #
  my $url=$self->base_url(secure => 0);
 
+ # Return secure equivalent of the current active URL
+ #
+ my $url=$self->base_url(secure => 1, active => 1);
+
 =cut
 
 sub base_url ($;%) {
     my $self=shift;
     my $args=get_args(\@_);
-    my $url;
+
     my $secure=$args->{secure};
     $secure=$self->is_secure unless defined $secure;
+
+    my $active=$args->{active};
+
+    my $url;
     if($secure) {
-        $url=$self->siteconfig->get('base_url_secure');
-        if(!$url) {
-            $url=$self->siteconfig->get('base_url');
-            $url=~s/^http:/https:/i;
-        }
+        $url=$active ? $self->clipboard->get('active_url_secure')
+                     : $self->siteconfig->get('base_url_secure');
     } else {
-        $url=$self->siteconfig->get('base_url');
+        $url=$active ? $self->clipboard->get('active_url')
+                     : $self->siteconfig->get('base_url');
     }
-    $url;
+
+    return $url;
 }
 
 ###############################################################################
@@ -1041,10 +1076,15 @@ arguments as base_url() method.
 
 sub pageurl ($;%) {
     my $self=shift;
+
+    my $pagedesc=$self->clipboard->get('pagedesc') ||
+        throw $self "pageurl - no Web context, needs clipboard->'pagedesc'";
+
     my $url=$self->base_url(@_);
-    my $url_path=$self->clipboard->get('pagedesc')->{fullpath};
-    $url_path="/".$url_path unless $url_path=~ /^\//;
-    $url.$url_path;
+    my $uri=$pagedesc->{fullpath} || '/';
+    $uri="/".$uri unless substr($uri,0,1) eq '/';
+
+    return $url.$uri;
 }
 
 ###############################################################################

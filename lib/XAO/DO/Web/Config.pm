@@ -30,7 +30,6 @@ use XAO::Errors qw(XAO::DO::Web::Config);
 # Prototypes
 #
 sub add_cookie ($@);
-sub cache ($%);
 sub cgi ($$);
 sub cleanup ($);
 sub clipboard ($);
@@ -46,7 +45,7 @@ sub new ($@);
 # Package version for checks and reference
 #
 use vars qw($VERSION);
-($VERSION)=(q$Id: Config.pm,v 1.6 2002/05/17 05:19:03 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Config.pm,v 1.10 2003/10/21 22:16:52 am Exp $ =~ /(\d+\.\d+)/);
 
 ###############################################################################
 
@@ -94,62 +93,21 @@ sub add_cookie ($@) {
     if($self->{cookies} && ref($cookie) && ref($cookie) eq 'HASH') {
         for(my $i=0; $i!=@{$self->{cookies}}; $i++) {
             my $c=$self->{cookies}->[$i];
+
             next unless ref($c) && ref($c) eq 'HASH';
+
             next unless $c->{-name} eq $cookie->{-name} &&
                         $c->{-path} eq $cookie->{-path} &&
-                        $c->{-domain} eq $cookie->{-domain};
+                        ((!defined($c->{-domain}) && !defined($cookie->{-domain})) ||
+                         $c->{-domain} eq $cookie->{-domain});
+
             $self->{cookies}->[$i]=$cookie;
+
             return $cookie;
         }
     }
 
     push @{$self->{cookies}},$cookie;
-}
-
-###############################################################################
-
-=item cache (%)
-
-Creates or retrieves a cache for use in various XAO::Web objects.
-Arguments are directly passed to XAO::Cache's new() method (see
-L<XAO::Cache>) except for 'name' argument which is used to identify the
-requested cache.
-
-If a cache with that name was already initialized before it is not
-re-created, but previously created version is returned instead.
-
-Example:
-
- my $cache=$self->cache(
-     name        => 'fubar',
-     retrieve    => \&real_retrieve,
-     coords      => ['foo','bar'],
-     expire      => 60
- );
-
-Caches are kept between executions in mod_perl environment.
-
-=cut
-
-sub cache ($%) {
-    my $self=shift;
-    my $args=get_args(\@_);
-
-    my $name=$args->{name} ||
-        throw XAO::E::DO::Web::Config "cache - no 'name' argument";
-
-    my $cache_list=$self->{cache_list};
-    if(! $cache_list) {
-        $cache_list=$self->{cache_list}={};
-    }
-
-    my $cache=$cache_list->{$name};
-    if(! $cache) {
-        $cache=XAO::Cache->new($args);
-        $cache_list->{$name}=$cache;
-    }
-
-    return $cache;
 }
 
 ###############################################################################
@@ -183,7 +141,7 @@ sub cgi ($$) {
         return $newcgi;
     }
     throw XAO::E::DO::Web::Config
-          "cgi - storing new CGI requires allow_special_access()";
+          "cgi - storing new CGI requires enable_special_access()";
 }
 
 ###############################################################################
@@ -268,7 +226,7 @@ header(), header_args().
 =cut
 
 sub embeddable_methods ($) {
-    qw(add_cookie cache cgi clipboard cookies header header_args);
+    qw(add_cookie cgi clipboard cookies header header_args);
 }
 
 ###############################################################################
@@ -338,6 +296,7 @@ sub header_args ($@) {
     my $self=shift;
     my $args=get_args(\@_);
     @{$self->{header_args}}{keys %{$args}}=values %{$args};
+    return $self->{header_args};
 }
 
 ###############################################################################

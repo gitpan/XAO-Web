@@ -16,6 +16,15 @@
 #include <string.h>
 #include <ctype.h>
 
+/* If that version of perl does not have pTHX_ macros then defining them here
+*/
+#ifndef	pTHX_
+#define	pTHX_
+#endif
+#ifndef	aTHX_
+#define	aTHX_
+#endif
+
 #define	MAX_STACK	200
 #define	CHUNK_SIZE	1000
 
@@ -24,6 +33,15 @@ static unsigned long bufsize=0;
 static unsigned long bufpos=0;
 static unsigned long pstack[MAX_STACK];
 static unsigned stacktop=0;
+
+/* Workaround for older versions of perl that do not define these macros
+*/
+#ifndef pTHX_
+#define pTHX_
+#endif
+#ifndef aTHX_
+#define aTHX_
+#endif
 
 /************************************************************************/
 
@@ -400,14 +418,14 @@ pop()
             }
             text=buffer+bufpos;
         }
-		RETVAL=newSVpvn(aTHX_ text,len);
+		RETVAL=newSVpvn(text,len);
 	OUTPUT:
 	    RETVAL
 
 void
 addtext(text)
         unsigned int len=0;
-		char * text=SvPV(aTHX_ ST(0),len);
+		char * text=SvPV(ST(0),len);
 	CODE:
 		if(text && len) {
 	        if(bufpos+len >= bufsize) {
@@ -426,7 +444,7 @@ addtext(text)
 SV *
 parse(text)
         unsigned int length=0;
-        char *template=SvPV(aTHX_ ST(0),length);
+        char *template=SvPV(ST(0),length);
     CODE:
         RETVAL=parse_text(aTHX_ template, length);
     OUTPUT:

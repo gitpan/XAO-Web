@@ -62,7 +62,7 @@ use XAO::Errors qw(XAO::DO::Web::FilloutForm);
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: FilloutForm.pm,v 1.7 2002/10/03 06:42:00 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: FilloutForm.pm,v 1.16 2003/09/30 18:56:25 am Exp $ =~ /(\d+\.\d+)/);
 
 sub setup ($%);
 sub field_desc ($$);
@@ -118,6 +118,7 @@ sub new ($%) {
 #  pre_check_form => pre_check_form subroutine reference 
 #  check_form =>     check_form subroutine reference
 #  submit_name =>    name of the submit button
+#  keep_form =>      display form template even when the form is complete
 #
 # Call to this subroutine is not required from derived objects, use
 # method overriding instead when possible!
@@ -137,7 +138,7 @@ sub setup ($%) {
     #  extra_data  - passed to handlers as is.
     #  submit_name - name of submit button for pre-filled forms (change form).
     #
-    my @names=qw(extra_data submit_name form_ok pre_check_form check_form);
+    my @names=qw(extra_data submit_name form_ok pre_check_form check_form keep_form);
     @{$self}{@names}=@{$args}{@names};
     my $values=$args->{values} || {};
     foreach my $fdata (@{$self->{fields}}) {
@@ -183,26 +184,6 @@ sub setup_fields ($%) {
     $self->{fields}=\@copy;
 }
 
-##
-# Retrieving field description.
-#
-sub field_desc ($$) {
-    my $self=shift;
-    my $name=shift;
-    my $fields=$self->{fields};
-    $fields || throw XAO::E::DO::Web::FilloutForm
-                     "field_desc - has not set fields for FilloutForm";
-    if(ref($fields) eq 'ARRAY') {
-        foreach my $fdata (@{$fields}) {
-            return $fdata if $fdata->{name} eq $name;
-        }
-    }
-    else {
-        return $fields->{$name} if $fields->{$name};
-    }
-    throw XAO::E::DO::Web::FilloutForm "field_desc - unknown field '$name' referred";
-}
-
 ###############################################################################
 
 =item display (%)
@@ -242,31 +223,35 @@ sub display ($;%) {
     #
     my $obj=$self->object;
 
+    # Special parameter named 'submit_name' contains submit button name
+    # and used for pre-filled forms - these forms usually already have
+    # valid data and we need some way to know when the form was really
+    # checked and corrected by user.
+    #
+    my $filled=$self->{submit_name} && $cgi->param($self->{submit_name}) ? 1 : 0;
+
     # First checking all parameters and collecting mistakes into errstr.
     #
     # Also creating hash with parameters for form diplaying while we are
     # going through fields anyway.
     #
     my $errstr;
-    my $filled;
     my %formparams;
     foreach my $fdata (@{$fields}) {
         my $name=$fdata->{name};
-
         my $cgivalue=$cgi->param($name);
         $filled++ if defined($cgivalue) &&
                      (!defined($fdata->{phase}) || $fdata->{phase} eq $phase);
-
-        my $value=$fdata->{newvalue};
-        $value=$cgivalue unless defined($value);
-        $value=$fdata->{value} unless defined($value);
-        $value=$fdata->{default} unless defined($value);
-        my $newerr;
 
         ##
         # Checking form phase for multi-phased forms if required.
         #
         next if defined($fdata->{phase}) && $phase<$fdata->{phase};
+
+        my $value=$fdata->{newvalue};
+        $value=$cgivalue unless defined($value);
+        $value=$fdata->{value} unless defined($value);
+        $value=$fdata->{default} unless defined($value);
 
         ##
         # Empty data is the same as undefined. Spaces are trimmed from the
@@ -278,6 +263,7 @@ sub display ($;%) {
         ##
         # Various checks depending on field style.
         #
+        my $newerr;
         my $style=$fdata->{style};
         if(!length($value) && $fdata->{required}) {
             $newerr="Required field!";
@@ -317,12 +303,49 @@ sub display ($;%) {
                 }
             }
         }
-        elsif($style eq 'phone') {
-            # No checks
+        elsif($style eq 'phone') {      # +99 (123) 456-78-90 x 123
+            $fdata->{maxlength}=30 unless $fdata->{maxlength};
+            if(length($value)) {
+                my ($p,$e)=split(/[a-zA-Z]+/,$value);
+
+                $p=~s/\D//g;
+                $e||='';
+                $e=~s/\D//g;
+
+                if(length($p)<10) {
+                    $newerr="Needs area code!";
+                }
+                elsif(length($p)==10) {
+                    $p='1' . $p;
+                }
+                elsif(length($p)>13) {
+                    $newerr="Too many digits!";
+                }
+
+                if(!$newerr) {
+                    ($value=$p)=~s/^(.+)(...)(...)(....)$/+$1 ($2) $3-$4/;
+                    $value.=" ext. $e" if $e;
+                }
+            }
         }
         elsif($style eq 'int' || $style eq 'integer' || $style eq 'number') {
-            if(length($value) && $value !~ /^\d+$/) {
-                $newerr="Is not an integer!"
+            if(length($value)) {
+                if($value =~ /^[\d,']+$/) {
+                    $value=~s/[,']+//g;
+                }
+                else {
+                    $newerr="Is not an integer!"
+                }
+            }
+        }
+        elsif($style eq 'real') {
+            if(length($value)) {
+                if($value =~ /^[\d,'\.]+$/) {
+                    $value=~s/[,']+//g;
+                }
+                else {
+                    $newerr="Is not an number!"
+                }
             }
         }
         elsif($style eq 'password') {
@@ -385,10 +408,10 @@ sub display ($;%) {
                 if(length($value)) {
                     $value=$self->calculate_year($value);
                     if($value<$minyear) {
-                        $newerr='Must be after $minyear!';
+                        $newerr="Must be after $minyear!";
                     }
                     elsif($value>$maxyear) {
-                        $newerr='Must be before $maxyear!';
+                        $newerr="Must be before $maxyear!";
                     }
                 }
             }
@@ -400,11 +423,40 @@ sub display ($;%) {
             }
         }
         elsif($style eq 'checkbox') {
-            $value=$value ? 1 : 0;
+
+            ##
+            # If checkbox is not checked we don't get any info about it
+            # in the cgi parameters. So we have to take a guess if the
+            # form was generally filled in, but we have an unchecked
+            # checkbox or this is the first display and form was not
+            # submitted yet.
+            #
+            if($filled) {
+                $value=$cgivalue ? 1 : 0;
+            }
+            else {
+                $value=(defined($fdata->{value}) ? $fdata->{value} : $fdata->{default}) ? 1 : 0;
+            }
         }
         elsif($style eq 'selection') {
-            if(length($value) && !exists($fdata->{options}->{$value})) {
-                $newerr='Bad option value!';
+            if(length($value)) {
+                my $opt=$fdata->{options};
+                if(ref($opt) eq 'HASH') {
+                    $newerr='Bad option value!' unless exists $opt->{$value};
+                }
+                elsif(ref($opt) eq 'ARRAY') {
+                    my $found;
+                    for(my $i=0; $i<@$opt; $i+=2) {
+                        if($opt->[$i] eq $value) {
+                            $found=1;
+                            last;
+                        }
+                    }
+                    $newerr='Bad option value!' unless $found;
+                }
+                else {
+                    $newerr='Unknown data in options!';
+                }
             }
         }
         else {
@@ -413,6 +465,7 @@ sub display ($;%) {
 
         # Generating HTML for some field styles.
         #
+        my $param=$fdata->{param} || uc($name);
         if($style eq 'country') {
             my @cl=$self->countries_list();
             my $html='';
@@ -431,6 +484,7 @@ sub display ($;%) {
                 my $sel=(lc(substr($c,0,2)) eq $stv) ? " SELECTED" : "";
                 $html.="<OPTION$sel>".t2ht($c)."</OPTION>\n";
             }
+            $formparams{"$param.HTML_OPTIONS"}=$html;
             $fdata->{html}=qq(<SELECT NAME=$name><OPTION VALUE="">Select State</OPTION>$html</SELECT>);
         }
         elsif($style eq 'cctype') {
@@ -452,7 +506,7 @@ sub display ($;%) {
             }
             $fdata->{html}=qq(<SELECT NAME=$name><OPTION VALUE="">Select Month</OPTION>$html</SELECT>);
         }
-        elsif($style eq 'year' && $fdata->{minyear} && $fdata->{maxyear}) {
+        elsif($style eq 'year' && !$fdata->{maxlength} && $fdata->{minyear} && $fdata->{maxyear}) {
             my $minyear=$self->calculate_year($fdata->{minyear});
             my $maxyear=$self->calculate_year($fdata->{maxyear});
             my $html='';
@@ -464,36 +518,62 @@ sub display ($;%) {
             $fdata->{html}=$html;
         }
         elsif($style eq 'checkbox') {
-            my $c=(defined($fdata->{value}) ? $fdata->{value} : $value) ? 1 : 0;
             $fdata->{html}=$obj->expand(
-                path => '/bits/fillout-form/html-checkbox',
-                NAME => $name,
-                VALUE => $fdata->{value} || '',
-                CHECKED => $c,
+                path    => '/bits/fillout-form/html-checkbox',
+                NAME    => $name,
+                VALUE   => $fdata->{value} || '',
+                CHECKED => $value,
             );
         }
         elsif($style eq 'selection') {
             my $opt=$fdata->{options} ||
                 $self->throw("display - no 'options' for '$name' selection");
 
+            my $has_empty;
+            my $used_selected;
             my $html='';
-            foreach my $v (sort { $opt->{$a} cmp $opt->{$b} } keys %$opt) {
-                my $sel=$value eq $v ? ' SELECTED' : '';
-                $html.='<OPTION VALUE="' . 
-                       t2hf($v) .
-                       '"' .  $sel . '>' .
-                       t2ht($opt->{$v}) .
+            my $html_sub=sub {
+                my ($v,$t)=@_;
+                $has_empty=1 if !length($v);
+                my $sel='';
+                if(!$used_selected && $value eq $v) {
+                    $sel=' SELECTED';
+                    $used_selected=1;
+                }
+                $html.='<OPTION VALUE="' . t2hf($v) . '"' . $sel . '>' .
+                       t2ht($t) .
                        '</OPTION>';
-            }
+            };
 
+            if(ref($opt) eq 'HASH') {
+                foreach my $v (sort { $opt->{$a} cmp $opt->{$b} } keys %$opt) {
+                    &{$html_sub}($v,$opt->{$v});
+                }
+            }
+            elsif(ref($opt) eq 'ARRAY') {
+                for(my $i=0; $i<@$opt; $i+=2) {
+                    &{$html_sub}($opt->[$i],$opt->[$i+1]);
+                }
+            }
+            else {
+                throw $self "Unknown data type in 'options' name=$name";
+            };
+
+            ##
+            # We do not display 'Please select' if there is an empty
+            # value in the list, we assume that that empty value is the
+            # prompt of some sort.
+            #
+            $formparams{"$param.HTML_OPTIONS"}=$html;
             $fdata->{html}='<SELECT NAME="' . t2hf($name) . '">' .
-                           '<OPTION VALUE="">Please select</OPTION>' .
+                           ($has_empty ? '' : '<OPTION VALUE="">Please select</OPTION>') .
                            $html .
                            '</SELECT>';
         }
         elsif($style eq 'text' || $style eq 'phone' || $style eq 'usphone' ||
               $style eq 'ccnum' || $style eq 'email' || $style eq 'year' ||
-              $style eq 'number' || $style eq 'int' || $style eq 'integer') {
+              $style eq 'number' || $style eq 'int' || $style eq 'integer' ||
+              $style eq 'real') {
             $fdata->{html}=$obj->expand(
                 path => '/bits/fillout-form/html-text',
                 NAME => $name,
@@ -527,22 +607,15 @@ sub display ($;%) {
         ##
         # Filling formparams hash
         #
-        my $param=$fdata->{param} || uc($name);
         $formparams{"$param.VALUE"}=defined($value) ? $value : "";
         $formparams{"$param.TEXT"}=$fdata->{text} || $name;
         $formparams{"$param.NAME"}=$name;
         $formparams{"$param.HTML"}=$fdata->{html} || "";
+        $formparams{"$param.SIZE"}=$fdata->{size} || 30;
         $formparams{"$param.MAXLENGTH"}=$fdata->{maxlength} || 0;
         $formparams{"$param.MINLENGTH"}=$fdata->{minlength} || 0;
         $formparams{"$param.ERRSTR"}=$fdata->{errstr} || '';
     }
-
-    # Special parameter named 'submit_name' contains submit button name and used
-    # for pre-filled forms - these forms usually already have valid data
-    # and we need some way to know when the form was really checked and
-    # corrected by user.
-    #
-    $filled=$cgi->param($self->{submit_name}) if $filled && $self->{submit_name};
 
     # Checking content for general compatibility by overriden
     # method. Called only if data are basicly good.
@@ -570,9 +643,13 @@ sub display ($;%) {
         }
     }
 
-    # If there were errors then displaying the form.
+    ##
+    # If there were errors then displaying the form. We also display
+    # the form here if it is not yet filled out and if it is, but we we
+    # asked to keep displaying it using 'keep_form' setup parameter.
     #
-    if(!$filled || $errstr) {
+    my $keep_form=$self->{keep_form};
+    if(!$filled || $errstr || $keep_form) {
         my $eh;
         my $et;
         if($errstr && $filled) {
@@ -591,12 +668,39 @@ sub display ($;%) {
             'ERRSTR.HTML' => $eh || '',
             %formparams,
         }));
-        return;
+        return unless $keep_form && !$errstr && $filled;
     }
 
+    ##
     # Our form is correct!
     #
     $self->form_ok(merge_refs($args,\%formparams));
+}
+
+###############################################################################
+
+=item field_desc ($)
+
+Returns field description by name. This is the correct way to get to the
+value of a field from check_form() or form_ok() methods.
+
+=cut
+
+sub field_desc ($$) {
+    my $self=shift;
+    my $name=shift;
+    my $fields=$self->{fields};
+    $fields || throw XAO::E::DO::Web::FilloutForm
+                     "field_desc - has not set fields for FilloutForm";
+    if(ref($fields) eq 'ARRAY') {
+        foreach my $fdata (@{$fields}) {
+            return $fdata if $fdata->{name} eq $name;
+        }
+    }
+    else {
+        return $fields->{$name} if $fields->{$name};
+    }
+    throw XAO::E::DO::Web::FilloutForm "field_desc - unknown field '$name' referred";
 }
 
 ##

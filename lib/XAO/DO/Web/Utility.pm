@@ -34,7 +34,7 @@ use XAO::Objects;
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Utility.pm,v 1.8 2002/04/25 18:52:14 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Utility.pm,v 1.12 2003/03/26 03:07:10 am Exp $ =~ /(\d+\.\d+)/);
 
 sub check_mode ($$) {
     my $self=shift;
@@ -112,8 +112,9 @@ sub tracking_url ($%)
           '?tracknbr=' . t2ht($tracknum);
    }
   elsif(lc($carrier) eq 'ups')
-   { $url='http://wwwapps.ups.com/etracking/tracking.cgi' .
-          '&TypeOfInquiryNumber=T' .
+   { $url='http://wwwapps.ups.com/WebTracking/processInputRequest' .
+          '?HTMLVersion=5.0&sort_by=status&tracknums_displayed=1' .
+          '&TypeOfInquiryNumber=T&loc=en_US&AgreeToTermsAndConditions=yes' .
           '&InquiryNumber1=' . t2ht($tracknum);
    }
   elsif(lc($carrier) eq 'fedex')
@@ -215,9 +216,9 @@ do not need to worry about that.
 
 =cut
 
-sub pass_cgi_params ($%)
-{ my $self=shift;
-  my $args=get_args(\@_);
+sub pass_cgi_params ($%) {
+    my $self=shift;
+    my $args=get_args(\@_);
 
     ##
     # Creating list of exceptions
@@ -237,35 +238,37 @@ sub pass_cgi_params ($%)
         $except{$param}=1;
     }
 
-  ##
-  # Expanding parameters in list
-  #
-  my @params;
-  foreach my $param (split(/[,\s]/,$args->{params}))
-   { $param=~s/\s//gs;
-     next unless length($param);
-     if(index($param,'*') != -1)
-      { $param=substr($param,0,index($param,'*'));
-        foreach my $p ($self->cgi->param)
-         { next unless index($p,$param) == 0;
-           push @params,$p;
-         }
-        next;
-      }
-     push @params,$param;
-   }
+    ##
+    # Expanding parameters in list
+    #
+    my @params;
+    foreach my $param (split(/[,\s]/,$args->{params})) {
+        $param=~s/\s//gs;
+        next unless length($param);
+        if(index($param,'*') != -1) {
+            $param=substr($param,0,index($param,'*'));
+            foreach my $p ($self->cgi->param) {
+                next unless defined $p;
+                next unless index($p,$param) == 0;
+                push @params,$p;
+            }
+            next;
+        }
+        push @params,$param;
+    }
 
     ##
     # Creating HTML code that will pass these parameters.
     #
     my $html;
+    my $result=$args->{result} || 'query';
     foreach my $param (@params) {
         next if $except{$param};
 
         my $value=$self->cgi->param($param);
         next unless defined $value;
 
-        if($args->{result} eq 'form') {
+        if($result eq 'form') {
             $html.='<INPUT TYPE="HIDDEN" NAME="' . t2hf($param) . '" VALUE="' . t2hf($value) . '">';
         }
         else {
@@ -286,9 +289,9 @@ arguments as Page's pageurl method and displays the same value.
 
 =cut
 
-sub show_current_url ($;%)
-{ my $self=shift;
-  $self->textout($self->pageurl(@_));
+sub show_current_url ($;%) {
+    my $self=shift;
+    $self->textout($self->pageurl(@_));
 }
 
 ###############################################################################

@@ -80,7 +80,7 @@ Supported comparison operators are:
 
     gele True if greater than or equal to 'a' and less than or equal to 'b'
     
-    wq  (word equal)True if contains given word completely.
+    wq  (word equal) True if contains given word completely.
     
     ws  (word start) True if contains word that starts with the given string.
 
@@ -184,7 +184,7 @@ use XAO::Errors qw(XAO::DO::Web::FS);
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: FS.pm,v 1.31 2002/09/13 23:36:09 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: FS.pm,v 1.42 2003/11/12 01:14:54 am Exp $ =~ /(\d+\.\d+)/);
 
 ###############################################################################
 
@@ -375,7 +375,7 @@ sub show_hash ($%) {
     }
 
     if($args->{extra_sub}) {
-        my $extra=$args->{extra_sub}(object => $hash, data => \%data, args => $args);
+        my $extra=&{$args->{extra_sub}}(object => $hash, data => \%data, args => $args);
         $self->object->display(merge_refs($args,$extra,\%data));
     }
     else {
@@ -513,40 +513,21 @@ sub search ($;%) {
     my $args = get_args(\@_);
     my $rh_conf = $self->siteconfig;
 
-    if ($args->{debug}) {
-        &XAO::Utils::set_debug(1);
-        #dprint "\n\n*** XAO::DO::Web::FS::search DEBUG MODE ***\n\n";
-        #dprint '*** Original Arguments:';
-        #foreach (sort keys %$args) { dprint " arg> $_: $args->{$_}\n"; }
-        #dprint '';
-    }
-
     #############
     #
     # PROCESS INPUT ARGUMENTS
     #
     #############
 
-    #$args->{uri} = $args->{db_list} unless $args->{uri};
-
     #
     # Add default arguments as specified in configuration
     # unless there are input arguments to override them.
     #
+    my $uri             = $args->{uri} || 'no_uri';
     my $rh_defaults     = $rh_conf->{default_search_args};
-    my $rh_default_args = $rh_defaults->{$args->{uri}};
+    my $rh_default_args = $rh_defaults->{$uri};
     if (ref($rh_default_args) eq 'HASH') {
-        foreach (keys %$rh_default_args) {
-            next if defined $args->{$_};
-            $args->{$_}  = $rh_default_args->{$_};
-            #dprint "*** Add Default Argument: $_ = $rh_default_args->{$_}";
-        }
-    }
-
-    if ($args->{debug}) {
-        #dprint '*** Processed Parameters:';
-        #foreach (sort keys %$args) { dprint " arg> $_: $args->{$_}"; }
-        #dprint '';
+        $args=merge_refs($rh_default_args,$args);
     }
 
     #############
@@ -556,8 +537,9 @@ sub search ($;%) {
     #############
 
     my $list = $self->get_object($args);
-    $list->objname eq 'FS::List' || throw $self "show_list - not a list";
-    #dprint "*** LIST: $list";
+    $list->objname eq 'FS::List' ||
+        $list->objname eq 'FS::Collection' ||
+        throw $self "search - '$uri' must be a list or a collection";
 
     #dprint "*** Go Search...\n\n";
     my $ra_query   = $self->_create_query($args, $rh_conf);
@@ -639,7 +621,10 @@ sub search ($;%) {
         my @fields;
         if($args->{fields}) {
             if($args->{fields} eq '*') {
-                my $n=$list->get_new;
+                my $n=XAO::Objects->new(
+                    objname => $list->describe->{class},
+                    glue    => $self->odb,
+                );
                 @fields=map { $n->describe($_)->{type} eq 'list' ? () : $_ } $n->keys;
             }
             else {
@@ -723,11 +708,12 @@ sub _create_query {
         #
         my @indexes = split(/\|/, $index);
         if ($compare_op eq 'wq' || $compare_op eq 'ws') {
-            #if ($value =~ /\|/) {
-            #    my @value_list = split(/\|/, $value);
-            #    $value         = \@value_list;
-            #}
-            $expr_ra[$i]   = $self->_create_expression(\@indexes, $compare_op, $value);
+            if ($value =~ /\s/) {
+                my @value_list=split(/\s+/, $value);
+                shift(@value_list) if @value_list && length($value_list[0])==0;
+                $value=\@value_list;
+            }
+            $expr_ra[$i]=$self->_create_expression(\@indexes, $compare_op, $value);
         }
         elsif ($compare_op =~ /^(g[et])(l[et])$/) {
             my ($lo, $hi) = split(/\|/, $value);
@@ -836,8 +822,12 @@ sub _create_query {
     #
     # Add any extra search options
     #
-    if ($args->{orderby} || $args->{distinct} || $args->{limit}) {
+    if ($args->{orderby} || $args->{distinct} || $args->{limit} || $args->{debug}) {
         my $rh_options = {};
+
+        if($args->{debug}) {
+            $rh_options->{debug}=1;
+        }
 
         #
         # Sort specifications
@@ -846,7 +836,7 @@ sub _create_query {
             my $ra_orderby = [];
             foreach (split(/\|/, $args->{orderby})) {
                 my $direction = /^-/ ? 'descend' : 'ascend';
-                s/\W//g;
+                s/\s//g;
                 push @$ra_orderby, ($direction => $_);
             }
             $rh_options->{orderby} = $ra_orderby;
@@ -943,8 +933,8 @@ sub edit_object ($%) {
     if ($id) {
         my @fnames_to_get;
         foreach my $fdata (@fields) {
-          next if $fdata->{style} eq 'password';
-          push @fnames_to_get, $fdata->{name};
+            next if $fdata->{style} eq 'password';
+            push @fnames_to_get, $fdata->{name};
         }
         my $object=$list->get($id);
         @values{@fnames_to_get}=$object->get(@fnames_to_get);
@@ -986,7 +976,6 @@ sub edit_object ($%) {
             my $form   = shift;
             my $object = $id ? $list->get($id) : $list->get_new();
             foreach my $name (map { $_->{name} } @fields) {
-                #next if (field not in form)
                 my $fdata = $form->field_desc($name);
                 my $value = $fdata->{value};
                 if ($fdata->{style} eq 'password') {
@@ -1007,7 +996,8 @@ sub edit_object ($%) {
             $self->object->display(path => $args->{'success.path'});
         },
     );
-    $form->display('form.path' => $args->{'form.path'});
+
+    $form->display($args);
 }
 ###############################################################################
 #

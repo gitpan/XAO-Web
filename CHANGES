@@ -1,3 +1,13 @@
+1.05 - 12-Nov-2003
+    * Web::FS - allow orderby on deep fields like 'Cont/value'
+    * Web::Clipboard - 'set' mode
+    * Web::Utility - updated UPS tracking URL
+    * Web::IdentifyUser - new id_cookie_type parameter
+    * Web::FS - 'search' mode now supports collections
+    * Web::URL - object added
+    * New clipboard parameters 'active_url' and 'active_url_secure' added
+    * aTHX_ fix from Mike Castle (perl-5.8.0 with ithread support)
+
 1.04 - 7-Nov-2002
     * XAO::Page - new 5 times faster C parser is used
     * XAO::PageSupport - new parser that supports '' and {''}

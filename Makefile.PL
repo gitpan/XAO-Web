@@ -81,10 +81,9 @@ EOT
 my %man3pods;
 foreach my $n (keys %{ExtUtils::Manifest::maniread()}) {
     next unless $n =~ '^(Web).pm$' ||
-                $n =~ '^lib/XAO/(.*)\.(pm|pod)$';
+                $n =~ '^lib/(.*)\.(pm|pod)$';
     my $man=$1;
     $man=~s/\/+/::/g;
-    $man='XAO::' . $man;
 
     open(F,$n) || die "Can't read $n: $!";
     my $pod=0;
@@ -110,9 +109,9 @@ WriteMakefile(
     'PREREQ_PM'     => {
         'Digest::MD5'       => 2.13,
         'MIME::Lite'        => 2.117,
-        'Error'             => 0.13,
-        'XAO::Base'         => 1.04,
-        'XAO::FS'           => 1.04,
+        'Error'             => 0.15,
+        'XAO::Base'         => 1.05,
+        'XAO::FS'           => 1.05,
         'Text::FormatTable' => 0.01,
     },
     'INSTALLBIN'	=> $homedir . '/bin',
@@ -127,7 +126,7 @@ sub MY::postamble
 config::	README
 
 README:	lib/XAO/Web/Intro.pod
-	pod2text lib/XAO/Web/Intro.pod > README
+	pod2text -w76 lib/XAO/Web/Intro.pod > README
 
 install::
 	[ -d $homedir ] || mkdir $homedir && chmod 755 $homedir
