@@ -27,6 +27,7 @@ Arguments are:
  subject     => message subject;
  [text.]path => text-only template path (required);
  html.path   => html template path;
+ date        => optional date header, passed as is
  ARG         => VALUE - passed to Page when executing templates;
 
 If 'to', 'from' or 'subject' are not specified then get_to(), get_from()
@@ -77,7 +78,7 @@ use XAO::Errors qw(XAO::DO::Web::Mailer);
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Mailer.pm,v 1.8 2003/03/29 01:53:51 am Exp $ =~ /(\d+\.\d+)/);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: Mailer.pm,v 2.1 2005/01/14 01:39:57 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
 
 sub display ($;%) {
     my $self=shift;
@@ -104,6 +105,17 @@ sub display ($;%) {
                                           $config->{from}->{$from};
     }
     $from || throw $self "display - no 'from' given";
+
+    my $from_hdr=$from;
+    if($from =~ /^\s*.*\s+<(.*\@.*)>\s*$/) {
+        $from=$1;
+    }
+    elsif($from =~ /^\s*(.*\@.*)\s+\(.*\)\s*$/) {
+        $from=$1;
+    }
+    else {
+        $from=~s/^\s*(.*?)\s*$/$1/;
+    }
 
     my $subject=$args->{subject} || $self->get_subject() || 'No subject';
 
@@ -139,27 +151,36 @@ sub display ($;%) {
     my $mailer;
     if($html && !$text) {
         $mailer=MIME::Lite->new(
-            From        => $from,
+            From        => $from_hdr,
+            FromSender  => $from,
             To          => $to,
             Subject     => $subject,
             Data        => $html,
             Type        => 'text/html',
+            Datestamp   => 0,
+            Date        => $args->{'date'} || undef,
         );
     }
     elsif($text && !$html) {
         $mailer=MIME::Lite->new(
-            From        => $from,
+            From        => $from_hdr,
+            FromSender  => $from,
             To          => $to,
             Subject     => $subject,
             Data        => $text,
+            Datestamp   => 0,
+            Date        => $args->{'date'} || undef,
         );
     }
     elsif($text && $html) {
         $mailer=MIME::Lite->new(
-            From        => $from,
+            From        => $from_hdr,
+            FromSender  => $from,
             To          => $to,
             Subject     => $subject,
             Type        => 'multipart/alternative',
+            Datestamp   => 0,
+            Date        => $args->{'date'} || undef,
         );
         $mailer->attach(
             Type        => 'text/html',
@@ -226,7 +247,11 @@ Nothing.
 
 =head1 AUTHOR
 
-Copyright (c) 2000-2001 XAO, Inc.
+Copyright (c) 2005 Andrew Maltsev
+
+Copyright (c) 2001-2004 Andrew Maltsev, XAO Inc.
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 =head1 SEE ALSO
 

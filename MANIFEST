@@ -4,6 +4,7 @@ MANIFEST
 MANIFEST.SKIP
 README
 TODO
+META.yml
 Makefile.PL
 Web.pm
 test.pl
@@ -99,10 +100,24 @@ testcases/testroot/templates/bits/WebTextTable/table-source
 testcases/testroot/templates/system.txt
 testcases/WebIdentifyUser.pm
  --------------------------------- Misc stuff
+misc/web-bench.pl
 misc/vim/HOWTO
 misc/vim/scripts.vim
 misc/vim/xaoweb.vim
-misc/web-bench.pl
+misc/samplesite/.cvsignore
+misc/samplesite/bin/.cvsignore
+misc/samplesite/bin/build-structure.proto
+misc/samplesite/configure.pl
+misc/samplesite/MANIFEST
+misc/samplesite/MANIFEST.MODES
+misc/samplesite/MANIFEST.SKIP
+misc/samplesite/objects/.cvsignore
+misc/samplesite/objects/Config.pm.proto
+misc/samplesite/README
+misc/samplesite/requires.pl
+misc/samplesite/testcases/base.pm
+misc/samplesite/testcases/requires.pm
+misc/samplesite/TODO
  --------------------------------- Benchmarking
 bench/bench.pl
 bench/results-20020719-am-workstation.txt

@@ -20,7 +20,7 @@ use XAO::Utils;
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Redirect.pm,v 1.5 2003/01/29 19:25:07 am Exp $ =~ /(\d+\.\d+)/);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: Redirect.pm,v 2.1 2005/01/14 01:39:57 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
 
 ###############################################################################
 
@@ -30,8 +30,9 @@ Arguments are:
 
  url        => new url or short path.
  target     => target frame (optional, only works with Netscape)
- base       => if set uses base site name (optiona)
+ base       => if set uses base site name (optional)
  secure     => if set uses secure protocol (optional)
+ permanent  => use status 301 (default is 302)
 
 =cut
 
@@ -51,15 +52,17 @@ sub display {
     ##
     # Additional fields into standard header.
     #
-    my %qa=( -Status => '302 Moved' );
+    my %qa=(
+        -Status => $args->{permanent} ? '301 Permanently Moved' : '302 Moved'
+    );
 
     ##
     # Target window works only with Netscape, but we do not care here and
     # do our best.
     #
     if($args->{target}) {
-        $qa{-Target}=$args->{target};
         dprint ref($self),"::display - 'target=$args->{target}' does not work with MSIE!";
+        $qa{-Target}=$args->{target};
     }
 
     ##
@@ -109,9 +112,11 @@ Nothing.
 
 =head1 AUTHOR
 
-Copyright (c) 2000-2003 XAO, Inc.
+Copyright (c) 2005 Andrew Maltsev
 
-Andrew Maltsev <am@xao.com>.
+Copyright (c) 2001-2004 Andrew Maltsev, XAO Inc.
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 =head1 SEE ALSO
 

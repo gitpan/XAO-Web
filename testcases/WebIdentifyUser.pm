@@ -253,6 +253,43 @@ sub test_no_vf_key {
                 },
             },
         },
+        #
+        # Checking case translation
+        #
+        t21     => {
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'M001',
+                password    => '12345',
+            },
+            results => {
+                cookies     => {
+                    member_id   => 'm001',
+                },
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/name'     => 'm001',
+                },
+                text        => 'V',
+            },
+        },
+        t22     => {
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    member_id   => 'm001',
+                },
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/name'     => 'm001',
+                },
+                text        => 'V',
+            },
+        },
     );
 
     $self->run_matrix(\%matrix,\%cjar);
@@ -605,6 +642,43 @@ sub test_user_prop_list {
                 text        => 'V',
             },
         },
+        t05     => {
+            sub_pre => sub {
+                $config->put('/identify_user/member/id_cookie_type' => 'name');
+            },
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'N3',
+                password    => '12345',
+            },
+            results => {
+                cookies     => {
+                    member_id   => 'n3',
+                },
+                clipboard   => {
+                    '/IdentifyUser/member/id'   => 'm001',
+                    '/IdentifyUser/member/name' => 'n3',
+                },
+                text        => 'V',
+            },
+        },
+        t06     => {
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    member_id   => 'n3',
+                },
+                clipboard   => {
+                    '/IdentifyUser/member/id'   => 'm001',
+                    '/IdentifyUser/member/name' => 'n3',
+                },
+                text        => 'V',
+            },
+        },
     );
 
     $self->run_matrix(\%matrix,\%cjar);
@@ -869,9 +943,27 @@ sub test_key_list {
                 },
             },
         },
-        t03     => {
+        t03a     => {
             sub_pre => sub {
                 $config->put('/identify_user/member/id_cookie_type' => 'id');
+            },
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'm001',
+                password    => '12345',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm001',
+                    mkey        => '1',
+                },
+                text        => 'V',
+            },
+        },
+        t03b     => {
+            cookies => {
+                mkey        => 0,
             },
             args => {
                 mode        => 'login',
@@ -1199,6 +1291,224 @@ sub test_key_list {
                 },
             },
         },
+        #
+        # Checking timing out of sessions
+        #
+        t17 => {
+            sub_pre => sub {
+                $config->put('/identify_user/member/vf_expire_time' => 2);
+                sleep(3);
+            },
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => '3',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => 3,
+                    '/IdentifyUser/member/id'       => 'm001',
+                },
+            },
+        },
+        #
+        # Switching back to name mode and checking expiration again. It
+        # should keep verification key by default and with
+        # expire_mode='keep'.
+        #
+        t18a    => {
+            sub_pre => sub {
+                $config->put('/identify_user/member/id_cookie_type' => 'id');
+            },
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'm002',
+                password    => '23456',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '5',
+                },
+                text        => 'V',
+            },
+        },
+        t18b     => {
+            sub_pre => sub {
+                sleep(3);
+            },
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '5',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => 'm002',
+                },
+            },
+        },
+        t18c     => {
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '5',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => 'm002',
+                },
+            },
+        },
+        t18d   => {
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'm002',
+                password    => '23456',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '5',
+                },
+                text        => 'V',
+            },
+        },
+        t18e => {
+            sub_pre => sub {
+                $config->put('/identify_user/member/expire_mode' => 'clean');
+                sleep(3);
+            },
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '0',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => 'm002',
+                },
+            },
+        },
+        t18f     => {
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '0',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => 'm002',
+                },
+            },
+        },
+        t18g   => {
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'm002',
+                password    => '23456',
+            },
+            results => {
+                cookies     => {
+                    mid         => 'm002',
+                    mkey        => '6',
+                },
+                text        => 'V',
+            },
+        },
+        #
+        # In 'key' mode along with expire_mode='clean' even the
+        # id_cookie should get cleared.
+        #
+        t19a    => {
+            sub_pre => sub {
+                $config->put('/identify_user/member/id_cookie_type' => 'key');
+                $config->put('/identify_user/member/expire_mode' => 'clean');
+            },
+            args => {
+                mode        => 'login',
+                type        => 'member',
+                username    => 'm001',
+                password    => '12345',
+            },
+            results => {
+                cookies     => {
+                    mid         => '7',
+                    mkey        => '6',
+                },
+                text        => 'V',
+            },
+        },
+        t19b     => {
+            sub_pre => sub {
+                sleep(3);
+            },
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mid         => '0',
+                    mkey        => '6',
+                },
+                text        => 'I',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => { },
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => '7',
+                },
+            },
+        },
+        t19c     => {
+            args => {
+                mode        => 'check',
+                type        => 'member',
+            },
+            results => {
+                cookies     => {
+                    mkey        => '6',
+                },
+                text        => 'A',
+                clipboard   => {
+                    '/IdentifyUser/member/object'   => undef,
+                    '/IdentifyUser/member/verified' => undef,
+                    '/IdentifyUser/member/name'     => undef,
+                },
+            },
+        },
     );
 
     $self->run_matrix(\%matrix,\%cjar);
@@ -1250,6 +1560,7 @@ sub run_matrix {
         }
 
         foreach my $cd (@{$config->cookies}) {
+            next unless defined $cd;
             $cjar->{$cd->name}=$cd->value;
         }
 

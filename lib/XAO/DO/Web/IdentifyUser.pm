@@ -297,7 +297,7 @@ use XAO::Objects;
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: IdentifyUser.pm,v 1.24 2003/09/29 05:34:12 am Exp $ =~ /(\d+\.\d+)/);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: IdentifyUser.pm,v 2.1 2005/01/14 01:39:57 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
 
 ###############################################################################
 
@@ -370,6 +370,8 @@ sub check {
         throw $self "check - no 'identify_user' configuration for '$type'";
     my $clipboard=$self->clipboard;
 
+    my $cookie_domain=$config->{domain};
+
     ##
     # These are useful for both verification and identification cookies.
     #
@@ -384,33 +386,34 @@ sub check {
     #
     my $cb_uri=$config->{cb_uri} || "/IdentifyUser/$type";
     my $id_cookie_type=$config->{id_cookie_type} || 'name';
+    my $key_list_uri=$config->{key_list_uri};
+    my $key_ref_prop=$config->{key_ref_prop};
+    my $key_object;
     my $user=$clipboard->get("$cb_uri/object");
     if(!$user) {
         my $id_cookie=$config->{id_cookie} ||
             throw $self "check - no 'id_cookie' in the configuration";
 
         my $cookie_value=$self->cgi->cookie($id_cookie);
+
         if(!$cookie_value) {
             return $self->display_results($args,'anonymous');
         }
 
         my $data;
+        my $list_uri=$config->{list_uri} ||
+            throw $self "check - no 'list_uri' in the configuration";
         if($id_cookie_type eq 'key') {
-            my $list_uri=$config->{list_uri} ||
-                throw $self "check - no 'list_uri' in the configuration";
-            my $key_list_uri=$config->{key_list_uri} ||
-                throw $self "check - key_list_uri required";
-            my $key_ref_prop=$config->{key_ref_prop} ||
-                throw $self "check - key_ref_prop required";
+            $key_list_uri || throw $self "check - key_list_uri required";
+            $key_ref_prop || throw $self "check - key_ref_prop required";
     
             my $user_list=$self->odb->fetch($list_uri);
             my $key_list=$self->odb->fetch($key_list_uri);
-            my $key_obj;
             my $user_id;
             my $user_obj;
             try {
-                $key_obj=$key_list->get($cookie_value);
-                ($user_id,$last_vf)=$key_obj->get($key_ref_prop,$vf_time_prop);
+                $key_object=$key_list->get($cookie_value);
+                ($user_id,$last_vf)=$key_object->get($key_ref_prop,$vf_time_prop);
                 $user_obj=$user_list->get($user_id);
             }
             otherwise {
@@ -423,12 +426,10 @@ sub check {
                 object      => $user_obj,
                 id          => $user_id,
                 name        => $cookie_value,
-                key_object  => $key_obj,
+                key_object  => $key_object,
             };
         }
         elsif($id_cookie_type eq 'id' && $config->{user_prop}) {
-            my $list_uri=$config->{list_uri} ||
-                throw $self "check - no 'list_uri' in the configuration";
             my $list=$self->odb->fetch($list_uri);
 
             my $user_prop=$config->{user_prop};
@@ -487,15 +488,23 @@ sub check {
         # Updating cookie, not doing it every time -- same reason as for
         # verification cookie below.
         #
-        $last_vf=$user->get($vf_time_prop) unless defined $last_vf;
         my $id_cookie_expire=$config->{id_cookie_expire} || 4*365*24*60*60;
-        my $quant=int($id_cookie_expire/20);
-        if($current_time-$last_vf > $quant) {
+        my $set_cookie_flag;
+        if($key_list_uri) {
+            $set_cookie_flag=1;
+        }
+        else {
+            $last_vf=$user->get($vf_time_prop) unless defined $last_vf;
+            my $quant=int($id_cookie_expire/60);
+            $set_cookie_flag=($current_time-$last_vf > $quant);
+        }
+        if($set_cookie_flag) {
             $self->siteconfig->add_cookie(
                 -name    => $id_cookie,
                 -value   => $cookie_value,
                 -path    => '/',
                 -expires => '+' . $id_cookie_expire . 's',
+                -domain  => $cookie_domain,
             );
         }
     }
@@ -509,21 +518,48 @@ sub check {
         my $vcookie;
 
         ##
+        # If we have a list of keys find the key that belongs to this
+        # browser. If there is not one, assume at most 'identified'
+        # status.
+        #
+        my $vf_key_cookie=$config->{vf_key_cookie};
+        if($key_list_uri && !$key_object) {
+            my $key_list=$self->odb->fetch($key_list_uri);
+            if($vf_key_cookie) {
+                my $key_id=$self->cgi->cookie($vf_key_cookie);
+                if($key_id) {
+                    try {
+                        $key_object=$key_list->get($key_id);
+                        if($key_object->get($key_ref_prop) ne $user->container_key) {
+                            $key_object=undef;
+                        }
+                    }
+                    otherwise {
+                        my $e=shift;
+                        dprint "IGNORED(OK): $e";
+                    };
+                }
+            }
+        }
+
+        ##
         # Checking the difference between the current time and the time
         # of last verification
         #
         my $vf_expire_time=$config->{vf_expire_time} ||
             throw $self "No 'vf_expire_time' in the configuration";
-        my $quant=int($vf_expire_time/20);
+        my $quant=int($vf_expire_time/60);
 
-        if(!defined $last_vf) {
-            my $key_object=$clipboard->get("$cb_uri/key_object");
+        if($key_list_uri) {
             if($key_object) {
                 $last_vf=$key_object->get($vf_time_prop);
             }
             else {
-                $last_vf=$user->get($vf_time_prop);
+                $last_vf=0;
             }
+        }
+        else {
+            $last_vf=$user->get($vf_time_prop);
         }
 
         if($last_vf && $current_time - $last_vf <= $vf_expire_time) {
@@ -533,10 +569,8 @@ sub check {
             # are present checking the content of the key cookie and
             # appropriate field in the user profile
             #
-            if(!exists $config->{key_list_uri} &&
-               ($config->{vf_key_prop} && $config->{vf_key_cookie})
-              ) {
-                my $web_key=$self->cgi->cookie($config->{vf_key_cookie}) || '';
+            if(!$key_list_uri && $config->{vf_key_prop} && $vf_key_cookie) {
+                my $web_key=$self->cgi->cookie($vf_key_cookie) || '';
                 my $db_key=$user->get($config->{vf_key_prop}) || '';
                 if($web_key && $db_key eq $web_key) {
                     $verified=1;
@@ -557,6 +591,7 @@ sub check {
                             -value   => $web_key,
                             -path    => '/',
                             -expires => '+4y',
+                            -domain  => $cookie_domain,
                         };
                     }
                 }
@@ -597,6 +632,34 @@ sub check {
             else {
                 $verified=0;
             }
+        }
+    }
+
+    ##
+    # If we are failed to verify and we have a configuration parameter
+    # called 'vf_key_strict' we remove 'vf_key_cookie' cookie.
+    # That might help better track verification from browser side
+    # applications and should not hurt anything else.
+    #
+    my $expire_mode=$config->{expire_mode} || 'keep';
+    if(!$verified && $expire_mode eq 'clean') {
+	if($id_cookie_type eq 'key') {
+            $self->siteconfig->add_cookie(
+                -name    => $config->{id_cookie},
+                -value   => 0,
+                -path    => '/',
+                -expires => 'now',
+                -domain  => $cookie_domain,
+            );
+        }
+        elsif($config->{vf_key_cookie}) {
+            $self->siteconfig->add_cookie(
+                -name    => $config->{vf_key_cookie},
+                -value   => 0,
+                -path    => '/',
+                -expires => 'now',
+                -domain  => $cookie_domain,
+            );
         }
     }
 
@@ -678,7 +741,7 @@ sub find_user ($$$) {
         try {
             my $obj;
             my $dref=\%d;
-            for(my $i=0; $i!=@names; $i++) {
+            for(my $i=0; $i!=@names; ++$i) {
                 my $searchprop=join('/',@names[$i..$#names]);
                 my $sr=$list->search($searchprop,'eq',$username);
                 return undef unless @$sr == 1;
@@ -695,32 +758,74 @@ sub find_user ($$$) {
                     $dref->{list_prop}=$name;
                     $dref=$dref->{$name}={};
                 }
+                else {
+                    # Real username can be different even though we used
+                    # 'eq' to get to it, MySQL ignores case by default.
+                    #
+                    my $real_username=$obj->get($searchprop);
+                    if($config->{id_case_sensitive}) {
+                        if($real_username ne $username) {
+                            eprint "Case difference between '$real_username' and '$username'";
+                            return undef;
+                        }
+                    }
+                    else {
+                        $username=$real_username;
+                    }
+                }
             }
         }
         otherwise {
             my $e=shift;
+            dprint "IGNORED(OK): $e";
         };
 
         return undef unless $d{object};
 
         $d{name}=$username;
+        $d{username}=$username;
 
         return \%d;
     }
     else {
         return undef unless $list->check_name($username);
+
         my $obj;
         try {
             $obj=$list->get($username);
         }
         otherwise {
             my $e=shift;
+            dprint "IGNORED(OK): $e";
         };
         return undef unless $obj;
 
+        ##
+        # Real username can be different even though we used
+        # 'eq' to get to it, MySQL ignores case by default.
+        #
+        my $real_key_name;
+        foreach my $key ($obj->keys) {
+            if($obj->describe($key)->{type} eq 'key') {
+                $real_key_name=$key;
+                last;
+            }
+        }
+        my $real_username=$obj->get($real_key_name);
+        if($config->{id_case_sensitive}) {
+            if($real_username ne $username) {
+                eprint "Case difference between '$real_username' and '$username'";
+                return undef;
+            }
+        }
+        else {
+            $username=$real_username;
+        }
+
         return {
-            object  => $obj,
-            name    => $username,
+            object      => $obj,
+            name        => $username,
+            username    => $username,
         };
     }
 }
@@ -751,6 +856,7 @@ sub login ($;%) {
         throw $self "login - no 'type' given";
     $config=$config->{$type} ||
         throw $self "login - no 'identify_user' configuration for '$type'";
+    my $cookie_domain=$config->{domain};
 
     ##
     # Looking for the user in the database
@@ -758,13 +864,22 @@ sub login ($;%) {
     my $username=$args->{username} ||
         throw $self "login - no 'username' given";
     my $data=$self->find_user($config,$username);
+
+    ##
+    # Since MySQL is not case sensitive by default on text fields, there
+    # was a glitch allowing people to log in with names like 'JOHN'
+    # where the database entry would be keyed 'john'. Later on, if site
+    # code compares user name to the database literally it does not
+    # match leading to strange problems and inconsistencies.
+    #
     my $errstr;
     my $user;
     if($data) {
         $user=$data->{object};
+        $username=$data->{name};
     }
     else {
-        $errstr="No information found about '$username'" unless $data;
+        $errstr="No information found about '$username'";
     }
 
     ##
@@ -839,19 +954,52 @@ sub login ($;%) {
             throw $self "login - key_ref_prop required";
         my $key_expire_prop=$config->{key_expire_prop} ||
             throw $self "login - key_expire_prop required";
-        my $key_expire_mode=$config->{key_expire_prop} || 'auto';
         my $vf_expire_time=$config->{vf_expire_time} ||
             throw $self "login - no vf_expire_time in the configuration";
 
+        my $key_id;
+        my $vf_key_cookie=$config->{vf_key_cookie};
+        if($id_cookie_type eq 'key') {
+            $key_id=$self->cgi->cookie($id_cookie);
+        }
+        elsif($vf_key_cookie) {
+            $key_id=$self->cgi->cookie($vf_key_cookie);
+        }
+        else {
+            throw $self "login - id_cookie_type!=key and there is no vf_key_cookie";
+        }
+
         my $key_list=$self->odb->fetch($key_list_uri);
-        my $key_obj=$key_list->get_new;
+        my $key_obj;
+        if($key_id) {
+            try {
+                $key_obj=$key_list->get($key_id);
+                if($key_obj->get($key_ref_prop) ne $user->container_key) {
+                    $key_obj=undef;
+                }
+            }
+            otherwise {
+                my $e=shift;
+                dprint "IGNORED(OK): $e";
+            };
+        }
+
         my $now=time;
-        $key_obj->put(
-            $key_ref_prop       => $user->container_key,
-            $key_expire_prop    => $now+$vf_expire_time,
-            $vf_time_prop       => $now,
-        );
-        my $key_id=$key_list->put($key_obj);
+        if(!$key_obj) {
+            $key_obj=$key_list->get_new;
+            $key_obj->put(
+                $key_ref_prop       => $user->container_key,
+                $key_expire_prop    => $now+$vf_expire_time,
+                $vf_time_prop       => $now,
+            );
+            $key_id=$key_list->put($key_obj);
+            $key_obj=$key_list->get($key_id);
+        }
+        else {
+            $key_obj->put(
+                $vf_time_prop       => $now,
+            );
+        }
 
         if($config->{vf_time_user_prop}) {
             $user->put($config->{vf_time_user_prop} => $now);
@@ -863,8 +1011,10 @@ sub login ($;%) {
                 -value   => $key_id,
                 -path    => '/',
                 -expires => '+10y',
+                -domain  => $cookie_domain,
             );
             $data->{name}=$key_id;
+            $data->{key_object}=$key_obj;
         }
         elsif($config->{vf_key_cookie}) {
             $self->siteconfig->add_cookie(
@@ -872,10 +1022,22 @@ sub login ($;%) {
                 -value   => $key_id,
                 -path    => '/',
                 -expires => '+10y',
+                -domain  => $cookie_domain,
             );
         }
-        else {
-            throw $self "login - id_cookie_type!=key and there is no vf_key_cookie";
+
+        ##
+        # Auto expiring some keys
+        #
+        my $key_expire_mode=$config->{key_expire_mode} || 'auto';
+        if($key_expire_mode eq 'auto') {
+            my $cutoff=time - 10*$vf_expire_time;
+            $self->odb->transact_begin;
+            my $sr=$key_list->search($key_expire_prop,'lt',$cutoff,{ limit => 5 });
+            foreach my $key_id (@$sr) {
+                $key_list->delete($key_id);
+            }
+            $self->odb->transact_commit;
         }
     }
     elsif($config->{vf_key_prop} && $config->{vf_key_cookie}) {
@@ -886,6 +1048,7 @@ sub login ($;%) {
             -value   => $random_key,
             -path    => '/',
             -expires => '+10y',
+            -domain  => $cookie_domain,
         );
     }
 
@@ -913,6 +1076,7 @@ sub login ($;%) {
             -value   => $cookie_value,
             -path    => '/',
             -expires => $expire,
+            -domain  => $cookie_domain,
         );
         $data->{name}=$cookie_value;
     }
@@ -922,6 +1086,7 @@ sub login ($;%) {
             -value   => $username,
             -path    => '/',
             -expires => $expire,
+            -domain  => $cookie_domain,
         );
         $data->{name}=$username;
     }
@@ -996,6 +1161,8 @@ sub logout{
     $config=$config->{$type} ||
         throw $self "logout - no 'identify_user' configuration for '$type'";
 
+    my $cookie_domain=$config->{domain};
+
     ##
     # Logging in the user first
     #
@@ -1052,6 +1219,7 @@ sub logout{
             -value   => '0',
             -path    => '/',
             -expires => 'now',
+            -domain  => $cookie_domain,
         );
     }
 
@@ -1072,6 +1240,7 @@ sub logout{
             -value   => '0',
             -path    => '/',
             -expires => 'now',
+            -domain  => $cookie_domain,
         );
 
         return $self->display_results($args,'anonymous');
@@ -1118,9 +1287,13 @@ Nothing
 
 =head1 AUTHOR
 
-Copyright (c) 2001 XAO, Inc.
+Copyright (c) 2005 Andrew Maltsev
 
-Andrew Maltsev <am@xao.com>,
+<am@ejelta.com> -- http://ejelta.com/xao/
+
+Copyright (c) 2001-2004 XAO Inc.
+
+Andrew Maltsev <am@ejelta.com>,
 Marcos Alves <alves@xao.com>,
 Ilya Lityuga <ilya@boksoft.com>.
 

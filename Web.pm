@@ -1,8 +1,7 @@
-#XXX - make test for XAO::Web
-
 package XAO::Web;
 use strict;
 use CGI;
+use Error qw(:try);
 use XAO::Utils;
 use XAO::Projects;
 use XAO::Objects;
@@ -15,7 +14,7 @@ use XAO::Errors qw(XAO::Web);
 # XAO::Web version number. Hand changed with every release!
 #
 use vars qw($VERSION);
-$VERSION='1.05';
+$VERSION='1.06';
 
 ###############################################################################
 
@@ -39,7 +38,8 @@ XAO::Web - XAO Web Developer, dynamic content building suite
 =head1 DESCRIPTION
 
 Please read L<XAO::Web::Intro> for general overview and setup
-instructions.
+instructions. Check also misc/samplesite for code examples and a generic
+site setup.
 
 XAO::Web module provides a frameworks for loading site configuration and
 executing objects and templates in the site context. It is used in
@@ -100,7 +100,7 @@ Methods of XAO::Web objects include:
 
 ###############################################################################
 
-sub analyze ($$;$);
+sub analyze ($$;$$);
 sub clipboard ($);
 sub config ($);
 sub execute ($%);
@@ -110,7 +110,7 @@ sub sitename ($);
 
 ###############################################################################
 
-=item analyze ($)
+=item analyze ($;$$)
 
 Checks how to display the given path (scalar or split up array
 reference). Always returns valid results or throws an error if that
@@ -124,10 +124,16 @@ Returns hash reference:
  objname  => object name that will serve this path
  objargs  => object args hash (may be empty)
 
+Optional second argument can be used to enforce a specific site name.
+
+Optional third argument must be used to allow returning records of types
+other than 'xaoweb'. This is used by Apache::XAO to get 'maptodir' and
+'external' mappings. Default is to look for xaoweb only records.
+
 =cut
  
-sub analyze ($$;$) {
-    my ($self,$patharr,$sitename)=@_;
+sub analyze ($$;$$) {
+    my ($self,$patharr,$sitename,$allow_other_types)=@_;
 
     $patharr=[ split(/\/+/,$patharr) ] unless ref $patharr;
 
@@ -152,15 +158,30 @@ sub analyze ($$;$) {
 
             ##
             # If $od is an empty string or an empty array reference --
-            # that means that we need to fall back to default handler
+            # this means that we need to fall back to default handler
             # for that path.
             #
             # The same happens for 'default' type in a hash reference.
             #
             my $rhash;
             if(ref($od) eq 'HASH') {
-                last if $od->{type} && $od->{type} eq 'default';
-                $rhash=merge_refs($od);
+                my $type=$od->{'type'} || 'xaoweb';
+                if($type eq 'default') {
+                    last;
+                }
+                elsif($type eq 'xaoweb') {
+                    throw XAO::E::Web "analyze - no objname/objargs for '$dir'";
+                    $rhash=merge_refs($od);
+                }
+                elsif($allow_other_types) {
+                    $rhash=merge_refs($od);
+                }
+                elsif($od->{'xaoweb'} && ref($od->{'xaoweb'}) eq 'HASH') {
+                    $rhash=merge_refs($od->{'xaoweb'});
+                }
+                else {
+                    next;
+                }
             }
             elsif(ref($od) eq 'ARRAY') {
                 last unless @$od;
@@ -186,9 +207,10 @@ sub analyze ($$;$) {
                 };
             }
 
-            $rhash->{path}=join('/',@{$patharr}[$i..$#$patharr]);
-            $rhash->{prefix}=$dir;
-            $rhash->{fullpath}=$path;
+            $rhash->{'path'}=join('/',@{$patharr}[$i..$#$patharr]);
+            $rhash->{'patharr'}=$patharr;
+            $rhash->{'prefix'}=$dir;
+            $rhash->{'fullpath'}=$path;
 
             return $rhash;
         }
@@ -202,9 +224,11 @@ sub analyze ($$;$) {
     if($filename) {
         return {
             type        => 'xaoweb',
+            subtype     => 'file',
             objname     => 'Page',
             objargs     => { },
             path        => $path,
+            patharr     => $patharr,
             fullpath    => $path,
             prefix      => join('/',@{$patharr}[0..($#$patharr-1)]),
             filename    => $filename,
@@ -215,9 +239,11 @@ sub analyze ($$;$) {
     # Nothing was found, returning Default object
     #
     return {
-        type        => 'notfound',
+        type        => 'xaoweb',
+        subtype     => 'notfound',
         objname     => 'Default',
         path        => $path,
+        patharr     => $patharr,
         fullpath    => $path,
         prefix      => ''
     };
@@ -268,7 +294,35 @@ sub execute ($%) {
     my $self=shift;
     my $args=get_args(\@_);
 
-    my ($pagetext,$header)=$self->expand($args);
+    ##
+    # We check if the site has a mapping for '/internal-error' in
+    # path_mapping_table. If it has we wrap expand() into the try block
+    # and execute /internal-error if we get an error.
+    #
+    my ($pagetext,$header);
+    try {
+        ($pagetext,$header)=$self->expand($args);
+    }
+    otherwise {
+        my $e=shift;
+        my $path="/internal-error/index.html";
+        my $pd=$self->analyze($path);
+        if($pd && $pd->{'type'} eq 'xaoweb' && $pd->{'objname'} ne 'Default') {
+            eprint "$e";
+            $self->clipboard->put("internal_error" => {
+                error       => $e,
+                path        => $args->{path},
+                pagedesc    => $self->clipboard->get('pagedesc'),
+            });
+            ($pagetext,$header)=$self->expand($args,{
+                path        => $path,
+                pagedesc    => $pd,
+            });
+        }
+        else {
+            throw $e;
+        }
+    };
 
     ##
     # If we get the header then it was not printed before and we are
@@ -282,7 +336,12 @@ sub execute ($%) {
                 $r->header_out($n => $v);
                 $r->err_header_out($n => $v);
             }
-            $r->send_http_header;
+            if($mod_perl::VERSION && $mod_perl::VERSION >= 1.99) {
+                $r->content_type('text/html') unless $r->content_type;
+            }
+            else {
+                $r->send_http_header;
+            }
             $r->print($pagetext) unless $r->header_only;
         }
         else {
@@ -324,9 +383,23 @@ sub expand ($%) {
     my $args=get_args(\@_);
 
     ##
-    # Processing the page and getting its text
+    # Processing the page and getting its text. Setting dprint and
+    # eprint to use Apache logging if there is a reference to Apache
+    # request given to us.
     #
-    my $pagetext=$self->process($args);
+    my $pagetext;
+    if($args->{apache}) {
+        my $old_logprint_handler=XAO::Utils::set_logprint_handler(sub {
+            $args->{apache}->server->warn($_[0]);
+        });
+
+        $pagetext=$self->process($args);
+
+        XAO::Utils::set_logprint_handler($old_logprint_handler);
+    }
+    else {
+        $pagetext=$self->process($args);
+    }
 
     ##
     # In scalar context (normal cases) we return only the resulting page
@@ -384,10 +457,13 @@ sub process ($%) {
     # Analyzing the path. We have to do that up here because the object
     # might specify that we should not touch CGI.
     #
-    my @path=split(/\//,$path);
-    push(@path,"") unless @path;
-    push(@path,"index.html") if $path =~ /\/$/;
-    my $pd=$args->{pagedesc} || $self->analyze(\@path);
+    my $pd=$args->{'pagedesc'};
+    if(!$pd) {
+        my @path=split(/\//,$path);
+        push(@path,"") unless @path;
+        push(@path,"index.html") if $path =~ /\/$/;
+        $pd=$self->analyze(\@path);
+    }
 
     ##
     # Figuring out current active URL. It might be the same as base_url
@@ -497,6 +573,7 @@ sub process ($%) {
     #
     my $mod_perl=($apache || $ENV{MOD_PERL}) ? 1 : 0;
     $siteconfig->clipboard->put(mod_perl => $mod_perl);
+    $siteconfig->clipboard->put(mod_perl_request => $apache);
 
     ##
     # Putting CGI object into site configuration. The special case is
@@ -512,15 +589,15 @@ sub process ($%) {
     # Checking for directory index url without trailing slash and
     # redirecting with appended slash if this is the case.
     #
-    if($path[-1] !~ /\.\w+$/) {
-        my $pd=$self->analyze([ @path,'index.html' ]);
+    if($pd->{patharr}->[-1] !~ /\.\w+$/) {
+        my $pd=$self->analyze([ @{$pd->{patharr}},'index.html' ]);
         #use Data::Dumper; dprint "pd=",Dumper($pd);
         if($pd->{objname} ne 'Default') {
             my $newpath=$siteconfig->get('base_url') . $path . '/';
             dprint "Redirecting $path to $newpath";
             $siteconfig->header_args(
                 -Location   => $newpath,
-                -Status     => 302,
+                -Status     => 301,
             );
             return "Directory index redirection\n";
         }
@@ -529,11 +606,13 @@ sub process ($%) {
     ##
     # Separator for the error_log :)
     #
-    my @d=localtime;
-    my $date=sprintf("%02u:%02u:%02u %u/%02u/%04u",$d[2],$d[1],$d[0],$d[4]+1,$d[3],$d[5]+1900);
-    undef(@d);
-    dprint "============ date=$date, mod_perl=$mod_perl",
-                      ", path='",join('/',@path),"', translated='",$pd->{path},"'";
+    if(XAO::Utils::get_debug()) {
+        my @d=localtime;
+        my $date=sprintf("%02u:%02u:%02u %u/%02u/%04u",$d[2],$d[1],$d[0],$d[4]+1,$d[3],$d[5]+1900);
+        undef(@d);
+        dprint "============ date=$date, mod_perl=$mod_perl, " .
+               "path='$path', translated='$pd->{path}'";
+    }
 
     ##
     # Putting path decription into the site clipboard
@@ -721,9 +800,11 @@ Nothing.
 
 =head1 AUTHOR
 
-Copyright (c) 2000-2001 XAO, Inc.
+Copyright (c) 2005 Andrew Maltsev
 
-Andrew Maltsev <am@xao.com>.
+Copyright (c) 2001-2004 Andrew Maltsev, XAO Inc.
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 =head1 SEE ALSO
 

@@ -45,7 +45,7 @@ sub new ($@);
 # Package version for checks and reference
 #
 use vars qw($VERSION);
-($VERSION)=(q$Id: Config.pm,v 1.10 2003/10/21 22:16:52 am Exp $ =~ /(\d+\.\d+)/);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: Config.pm,v 2.1 2005/01/14 01:39:57 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
 
 ###############################################################################
 
@@ -79,12 +79,26 @@ Examples:
                      -value => 'xyzzy',
                      -expires=>'+1h');
 
+For convenience, if there is a '-domain' argument and it refers to a
+list of domains the cookie is expanded into a set of cookies for all
+these domains.
+
 =cut
 
 sub add_cookie ($@) {
     my $self=shift;
     my $cookie=(@_==1 ? $_[0] : get_args(\@_));
-  
+
+    if(ref($cookie) && $cookie->{-domain} && ref($cookie->{-domain})) {
+        my $dlist=$cookie->{-domain};
+        foreach my $domain (@$dlist) {
+            $self->add_cookie(merge_refs($cookie,{
+                -domain     => $domain,
+            }));
+        }
+        return;
+    }
+
     ##
     # If new cookie has the same name, domain and path
     # as previously set one - we replace it. Works only for
@@ -99,7 +113,8 @@ sub add_cookie ($@) {
             next unless $c->{-name} eq $cookie->{-name} &&
                         $c->{-path} eq $cookie->{-path} &&
                         ((!defined($c->{-domain}) && !defined($cookie->{-domain})) ||
-                         $c->{-domain} eq $cookie->{-domain});
+                         (defined($c->{-domain}) && defined($cookie->{-domain}) &&
+                          $c->{-domain} eq $cookie->{-domain}));
 
             $self->{cookies}->[$i]=$cookie;
 
@@ -320,9 +335,11 @@ __END__
 
 =head1 AUTHOR
 
-Copyright (c) 1999-2001 XAO Inc.
+Copyright (c) 2005 Andrew Maltsev
 
-Author is Andrew Maltsev <am@xao.com>.
+Copyright (c) 2001-2004 Andrew Maltsev, XAO Inc.
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 =head1 SEE ALSO
 

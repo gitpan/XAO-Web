@@ -181,10 +181,11 @@ use strict;
 use Digest::MD5 qw(md5_base64);
 use XAO::Utils;
 use XAO::Errors qw(XAO::DO::Web::FS);
+use XAO::Objects;
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: FS.pm,v 1.43 2003/11/13 06:15:15 am Exp $ =~ /(\d+\.\d+)/);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: FS.pm,v 2.2 2005/01/14 01:47:35 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
 
 ###############################################################################
 
@@ -303,12 +304,19 @@ sub delete_property ($%) {
     my $self=shift;
     my $args=get_args(\@_);
 
+    my $object=$self->get_object($args);
+
     my $name=$args->{name} ||
         throw $self "delete_property - no 'name'";
-    $self->odb->_check_name($name) ||
-        throw $self "delete_property - bad name '$name'";
 
-    my $object=$self->get_object($args);
+    if($object->objtype eq 'List') {
+        $object->check_name($name) ||
+            throw $self "delete_property - bad name '$name'";
+    }
+    else {
+        $self->odb->check_name($name) ||
+            throw $self "delete_property - bad name '$name'";
+    }
 
     $object->delete($name);
 }
@@ -1021,6 +1029,10 @@ No publicly available methods except overriden display().
 Nothing.
 
 =head1 AUTHOR
+
+Copyright (c) 2003-2005 Andrew Maltsev
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 Copyright (c) 2000-2002 XAO, Inc.
 

@@ -83,6 +83,7 @@ foreach my $n (keys %{ExtUtils::Manifest::maniread()}) {
     next unless $n =~ '^(Web).pm$' ||
                 $n =~ '^lib/(.*)\.(pm|pod)$';
     my $man=$1;
+    $man='XAO::Web' if $man eq 'Web';
     $man=~s/\/+/::/g;
 
     open(F,$n) || die "Can't read $n: $!";
@@ -98,20 +99,20 @@ foreach my $n (keys %{ExtUtils::Manifest::maniread()}) {
     $man3pods{$n}='$(INST_MAN3DIR)/' . $man . '.3';
 }
 
-
 use XAO::Base qw($homedir);
 
 WriteMakefile(
-    'ABSTRACT'      => 'XAO Web Developer',
-    'AUTHOR'        => 'XAO Inc. http://xao.com/',
+    'ABSTRACT'      => 'XAO Web templating system',
+    'AUTHOR'        => 'Andrew Maltsev, http://ejelta.com/xao/',
     'NAME'          => 'XAO::Web',
     'VERSION_FROM'  => 'Web.pm',
     'PREREQ_PM'     => {
+        'CGI'               => 2.91,
         'Digest::MD5'       => 2.13,
         'MIME::Lite'        => 2.117,
         'Error'             => 0.15,
-        'XAO::Base'         => 1.05,
-        'XAO::FS'           => 1.05,
+        'XAO::Base'         => 1.06,
+        'XAO::FS'           => 1.06,
         'Text::FormatTable' => 0.01,
     },
     'INSTALLBIN'	=> $homedir . '/bin',

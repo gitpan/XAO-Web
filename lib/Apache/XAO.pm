@@ -90,17 +90,46 @@ apache child thus saving memory and child startup time:
 package Apache::XAO;
 use strict;
 use warnings;
-use Apache::Constants qw(:common);
-use Socket;
 use XAO::Utils;
 use XAO::Web;
-use XAO::Templates;
+
+###############################################################################
+
+use vars qw($VERSION);
+$VERSION=(0+sprintf('%u.%03u',(q$Id: XAO.pm,v 2.1 2005/01/14 01:39:56 am Exp $ =~ /\s(\d+)\.(\d+)\s/))) || die "Bad VERSION";
+
+use mod_perl;
+use constant MP2 => ($mod_perl::VERSION && $mod_perl::VERSION >= 1.99);
+
+BEGIN {
+    if(MP2) {
+        require Apache::Const;
+        Apache::Const->import(-compile => qw(OK DECLINED SERVER_ERROR NOT_FOUND));
+
+        ##
+        # Required to bring in methods used below
+        #
+        require Apache::Server;
+        Apache::Server->import();
+        require Apache::ServerUtil;
+        Apache::ServerUtil->import();
+        require Apache::Log;
+        Apache::Log->import();
+        require Apache::RequestRec;
+        Apache::RequestRec->import();
+        require Apache::RequestIO;
+        Apache::RequestIO->import();
+    }
+    else {
+        require Apache::Constants;
+        Apache::Constants->import(qw(:common));
+    }
+}
 
 ###############################################################################
 
 sub handler_content ($);
-sub parse_ip_port ($);
-sub server_error ($$$);
+sub server_error ($$;$);
 
 ###############################################################################
 
@@ -111,7 +140,7 @@ sub handler {
     # Request URI
     #
     my $uri=$r->uri;
-    #dprint "uri=$uri";
+    ### $r->server->log_error("HANDLER: $uri");
 
     ##
     # Checking if we were called as a PerlHandler and complaining
@@ -127,8 +156,8 @@ EOT
     # By convention we disallow access to /bits/ for security reasons.
     #
     if(index($uri,'/bits/')>=0) {
-        eprint "Attempt of direct access to /bits/ ($uri)";
-        return NOT_FOUND;
+        ### $r->server->log_error("Attempt of direct access to /bits/ ($uri)");
+        return MP2 ? Apache::NOT_FOUND : Apache::Constants::NOT_FOUND;
     }
 
     ##
@@ -178,21 +207,20 @@ EOT
     #
     my $pagedesc;
     if(substr($uri,-1,1) eq '/') {
-        $pagedesc=$web->analyze($uri . 'index.html',$sitename);
+        $pagedesc=$web->analyze($uri . 'index.html',$sitename,1);
     }
     else {
-        $pagedesc=$web->analyze($uri,$sitename);
+        $pagedesc=$web->analyze($uri,$sitename,1);
     }
     my $ptype=$pagedesc->{type} || 'xaoweb';
     if($ptype eq 'external') {
-        dprint "External URI ($uri), not processing at all";
-        return DECLINED;
+        ### $r->server->log_error("EXTERNAL: uri=$uri");
+        return MP2 ? Apache::DECLINED : Apache::Constants::DECLINED;
     }
     elsif($ptype eq 'maptodir') {
         my $dir=$pagedesc->{directory} || '';
         if(!length($dir) || substr($dir,0,1) ne '/') {
             my $phdir=$XAO::Base::projectsdir . "/" . $sitename;
-            #dprint "phdir=$phdir";
             if(length($dir)) {
                 $dir=$phdir . '/' . $dir;
             }
@@ -202,29 +230,55 @@ EOT
         }
         $dir.='/' . $uri;
         $dir=~s/\/{2,}/\//g;
-        #dprint "Translated $uri to $dir";
         $r->filename($dir);
-        return OK;
+        ### $r->server->log_error("MAPTODIR: => $dir");
+        return MP2 ? Apache::OK : Apache::Constants::OK;
     }
 
     ##
-    # This may be wrong, I do not completely understand mechanics that
-    # lead to it, but we get sub-requests from Apache::Status that
-    # install a handler and then it gets called on the main request, not
-    # a sub-request.
+    # We pass the knowledge along in the 'notes' table.
     #
-    return DECLINED unless $r->is_main;
+    $r->pnotes(xaoweb   => $web);
+    $r->pnotes(pagedesc => $pagedesc);
+    $r->pnotes(uri      => $uri);
 
     ##
-    # Default is to install a content handler to produce actual
-    # output. We also pass the knowledge along in the 'notes' table.
+    # Default is to install a content handler to produce actual output.
+    # It could be more optimal to have two always present handlers
+    # instead of pushing/popping automatically -- in this case
+    # 'HandlerType' must be set to 'static' in the server config.
     #
-    dprint "Installing XAO::Web handler to handle uri=$uri";
-    $r->pnotes(sitename  => $sitename);
-    $r->pnotes(xaoweb    => $web);
-    $r->pnotes(pagedesc  => $pagedesc);
-    $r->push_handlers(PerlHandler => \&handler_content);
-    return OK;
+    # We return OK to indicate to Apache that there is no need to try
+    # to map that URI to anything else, we know how to produce results
+    # for it.
+    #
+    my $htype=lc($r->dir_config('HandlerType') || 'auto');
+    if($htype eq 'auto') {
+        ### $r->server->log_error("TRANS: auto (uri=$uri)");
+
+        ##
+        # In mod_perl 2.x filepath translation is done in a separate
+        # phase, we need to set up a handler for it -- otherwise apache
+        # will still attempt to map filename, and worse yet -- attempt
+        # to redirect to language specific 'index.html.en' for example.
+        #
+        if(MP2) {
+            $r->push_handlers(PerlMapToStorageHandler => \&handler_map_to_storage);
+            $r->push_handlers(PerlResponseHandler => \&handler_content);
+            return Apache::OK();
+        }
+        else {
+            $r->push_handlers(PerlHandler => \&handler_content);
+            return Apache::Constants::OK();
+        }
+    }
+    elsif($htype eq 'static') {
+        ### $r->server->log_error("TRANS: static (uri=$uri)");
+        return MP2 ? Apache::OK : Apache::Constants::OK;
+    }
+    else {
+        return server_error($r,"Unknown HandlerType '$htype'");
+    }
 }
 
 ###############################################################################
@@ -233,18 +287,18 @@ sub handler_content ($) {
     my $r=shift;
 
     ##
-    # Getting the data
+    # Getting the data. If there is no data then trans handler was not
+    # executed or has declined, so we do not need to do anything.
     #
-    my $uri=$r->uri;
-    my $sitename=$r->pnotes('sitename');
-    my $web=$r->pnotes('xaoweb');
+    my $web=$r->pnotes('xaoweb') ||
+        return MP2 ? Apache::DECLINED : Apache::Constants::DECLINED;
     my $pagedesc=$r->pnotes('pagedesc');
 
     ##
-    # It happens on some sub-requests went wrong. Noticed on
-    # Apache::Status for instance.
+    # We have to get the original URI, the one in $r->uri may get mangled
     #
-    return DECLINED unless $web;
+    my $uri=$r->pnotes('uri');
+    ### $r->server->log_error("CONTENT: uri=$uri");
 
     ##
     # Executing
@@ -255,24 +309,30 @@ sub handler_content ($) {
         pagedesc    => $pagedesc,
     );
 
-    return OK;
+    return MP2 ? Apache::OK : Apache::Constants::OK;
 }
 
 ###############################################################################
 
-sub parse_ip_port ($) {
-    my ($port,$ip)=unpack_sockaddr_in($_[0]);
-    return (inet_ntoa($ip),$port);
+sub handler_map_to_storage {
+    my $r=shift;
+    ### $r->server->log_error("MAPTOSTORAGE: uri=".$r->uri);
+    return Apache::OK();
 }
 
 ###############################################################################
 
-sub server_error ($$$) {
+sub server_error ($$;$) {
     my ($r,$name,$desc)=@_;
 
-    eprint "Apache::XAO - $name";
-    $r->custom_response(SERVER_ERROR,"<H2>XAO::Web System Error: $name</H2>\n$desc");
-    return SERVER_ERROR;
+    $desc=$name unless $desc;
+
+    $r->server->log_error("*ERROR: Apache::XAO - $name");
+    $r->custom_response(
+        (MP2 ? Apache::SERVER_ERROR : Apache::Constants::SERVER_ERROR),
+        "<H2>XAO::Web System Error: $name</H2>\n$desc"
+    );
+    return MP2 ? Apache::SERVER_ERROR : Apache::Constants::SERVER_ERROR;
 }
 
 ###############################################################################
@@ -285,9 +345,11 @@ Nothing.
 
 =head1 AUTHOR
 
-Copyright (c) 2003 XAO, Inc.
+Copyright (c) 2005 Andrew Maltsev
 
-Andrew Maltsev <am@xao.com>.
+Copyright (c) 2001-2004 Andrew Maltsev, XAO Inc.
+
+<am@ejelta.com> -- http://ejelta.com/xao/
 
 =head1 SEE ALSO
 
