@@ -75,7 +75,7 @@ use XAO::Errors qw(XAO::DO::Web::Mailer);
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Mailer.pm,v 1.4 2002/01/04 02:13:23 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Mailer.pm,v 1.6 2002/06/18 01:36:33 am Exp $ =~ /(\d+\.\d+)/);
 
 sub display ($;%) {
     my $self=shift;
@@ -84,7 +84,7 @@ sub display ($;%) {
     my $config=$self->siteconfig->get('/mailer') || {};
 
     my $to=$args->{to} ||
-           $self->get_to ||
+           $self->get_to($args) ||
            throw $self "display - no 'to' given";
 
     my $from=$args->{from};
@@ -105,11 +105,12 @@ sub display ($;%) {
     #
     my $page=$self->object;
     my $text;
-    if($args->{'text.path'} || $args->{path}) {
-        my $textpath=$args->{'text.path'} ||
-                     $args->{path};
-        my $objargs=merge_refs($args, { path => $textpath });
-        delete $objargs->{template};
+    if($args->{'text.path'} || $args->{path} ||
+       $args->{'text.template'} || $args->{template}) {
+        my $objargs=merge_refs($args, {
+            path        => $args->{'text.path'} || $args->{path},
+            template    => $args->{'text.template'} || $args->{template},
+        });
         $text=$page->expand($objargs);
     }
     
@@ -117,9 +118,11 @@ sub display ($;%) {
     # Parsing HTML template
     #
     my $html;
-    if($args->{'html.path'}) {
-        my $objargs=merge_refs($args,{ path => $args->{'html.path'} });
-        delete $objargs->{template};
+    if($args->{'html.path'} || $args->{'html.template'}) {
+        my $objargs=merge_refs($args,{
+            path        => $args->{'html.path'},
+            template    => $args->{'html.template'},
+        });
         $html=$page->expand($objargs);
     }
 
@@ -182,6 +185,24 @@ sub display ($;%) {
     else {
         $mailer->send('smtp',$agent || 'localhost');
     }
+}
+
+###############################################################################
+
+sub get_to ($%) {
+    return '';
+}
+
+###############################################################################
+
+sub get_from ($%) {
+    return '';
+}
+
+###############################################################################
+
+sub get_subject ($%) {
+    return '';
 }
 
 ###############################################################################

@@ -68,7 +68,7 @@ First it checks if there is an argument given to original Page's
 display() method named 'Page' (case sensitive). In our case there is no
 such argument present.
 
-Then, as nor such static argument is found, it attempts to load an
+Then, as no such static argument is found, it attempts to load an
 object named 'Page' and pass whatever arguments given to that object's
 display method.
 
@@ -98,9 +98,8 @@ Then the output produced by the original Page's display would be:
 
   </BODY></HTML>
 
-For actual site you might opt to use specific objects for header and
-footer (see L<XAO::DO::Web::Header> and
-L<XAO::DO::Web::Footer>):
+For the actual site you might opt to use specific objects for header and
+footer (see L<XAO::DO::Web::Header> and L<XAO::DO::Web::Footer>):
 
   <%Header title="My first XAO::Web page"%>
 
@@ -120,8 +119,8 @@ this template would be translated into:
 
   <A HREF="http://demosite.com/somepage.html">blah blah blah</A>
 
-Even more interesting is that you can use embedding to construct
-arguments for embedded objects:
+Even more interesting is that you can use embedding to create arguments
+for embedded objects:
 
   <%Date gmtime={<%CgiParam param="shippingtime" default="0"%>}%>
 
@@ -172,7 +171,39 @@ But it is not recommended to use that method and it is not guaranteed
 that this will remain legal in future versions. Kept mostly for
 compatibility with already deployed code.
 
+=item 4
+
+To pass a string literally without performing any substitutions you can
+use single quotes. For instance:
+
+ <%FS
+   uri="/Members/<%MEMBER_ID/f%>"
+   mode="show-hash"
+   fields="*"
+   template='<%MEMBER_AGE/f%> -- <%MEMBER_STATUS/f%>'
+ %>
+
+If double quotes were used in this example then the parser would try to
+expand <%MEMBER_AGE%> and <%MEMBER_STATUS%> variables using the current
+object arguments which is not what is intended. Using single quotes it
+is possible to let FS object do the expansion and therefore insert
+database values in this case.
+
+=item 5
+
+To pass multiple nested arguments literally or to include a single quote
+into the string matching pairs of {' and '} can be used:
+
+ <%FS
+   uri="/Members/<%MEMBER_ID/f%>"
+   mode="show-hash"
+   fields="*"
+   template={'Member's age is <%MEMBER_AGE/f%>'}
+ %>
+
 =back
+
+=head2 EMBEDDING SPECIAL CHARACTERS
 
 Sometimes it is necessary to include various special symbols into
 argument values. This can be done in the same way you would embed
@@ -182,13 +213,13 @@ special symbols into HTML tags arguments:
 
 =item *
 
-By using &tag; construct, where tag could be "quot", "lt", "gt" and
+By using &tag; construction, where tag could be "quot", "lt", "gt" and
 "amp" for double quote, left angle bracket, right angle bracket and
 ampersand respectfully.
 
 =item *
 
-By using &#NNN; construct where NNN is the decimal code for the
+By using &#NNN; construction where NNN is the decimal code for the
 corresponding symbol. For example left curly bracket could be encoded as
 &#123; and right curly bracket as &#125;. The above example should be
 re-written as follows to make it legal:
@@ -196,6 +227,64 @@ re-written as follows to make it legal:
  name={single &#123; inside}
 
 =back
+
+=head2 OUTPUT CONVERSION
+
+As the very final step in the processing of an embedded object or
+variable the parser will check if it has any flags and convert it
+accordingly. This can (and should) be used to safely pass special
+characters into fields, HTML documents and so on.
+
+For instance, the following code might break if you do not use flags and
+variable will contain a duoble quote character in it:
+
+ <INPUT TYPE="TEXT" VALUE="<$VALUE$>">
+
+Correct way to write it would be (note /f after VALUE):
+
+ <INPUT TYPE="TEXT" VALUE="<$VALUE/f$>">
+
+Generic format for specifying flags is:
+
+ <%Object/x ...%> or <$VARIABLE/x$>
+
+Where 'x' could be one of:
+
+=over
+
+=item f
+
+Converts text for safe use in HTML elements attributes. Mnemonic for
+remembering - (f)ield.
+
+Will convert '123"234' into '123&quot;234'.
+
+=item h
+
+Converts text for safe use in HTML text. Mnemonic - (H)TML.
+
+Will convert '123<BR>234' into '123&lt;BR&gt;234'.
+
+=item q
+
+Converts text for safe use in HTML query parameters. Mnemonic - (q)uery.
+
+Will convert '123 234' into '123+234'.
+
+Example: <A HREF="test.html?name=<$VAR/q$>">Test '<$VAR/h$>'</A>
+
+=item s
+
+The same as 'h' excepts that it translates empty string into
+'&nbsp;'. Suitable for inserting pieces of text into table cells.
+
+=back
+
+It is a very good habit to use flags as much as possible and always
+specify a correct conversion. Leaving output untranslated may lead to
+anything from broken HTML to security violations.
+
+=head2 LEVELS OF PARSING
 
 Arguments can include as many level of embedding as you like, but you
 must remember:
@@ -222,7 +311,7 @@ the template one level up from them.
 As a test of how you understood everything above please attempt to
 predict what would be printed by the following example (after reading
 L<XAO::DO::Web::SetArg> or guessing its meaning). The answer is
-about one page down, at the end of description chapter.
+about one page down, at the end of this chapter.
 
  <%SetArg name="V1" value="{}"%>
  <%SetArg name="V2" value={""}%>
@@ -255,7 +344,7 @@ file. Here is an example:
  <%Footer%>
 
 One exception is JavaScript code which is usually put into comments. The
-parser would NOT remove comments if open comment is <!--//. Here is an
+parser will NOT remove comments if open comment is <!--//. Here is an
 example of JavaScript code:
 
  <SCRIPT LANGUAGE="JAVASCRIPT"><!--//
@@ -298,6 +387,7 @@ from Page unless overwritten) are:
 ###############################################################################
 package XAO::DO::Web::Page;
 use strict;
+#use Data::Dumper; #XXX - remove
 use XAO::Utils;
 use XAO::Cache;
 use XAO::Templates;
@@ -309,7 +399,7 @@ use Error qw(:try);
 use base XAO::Objects->load(objname => 'Atom');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Page.pm,v 1.13 2002/02/20 01:03:29 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Page.pm,v 1.22 2002/10/29 09:42:31 am Exp $ =~ /(\d+\.\d+)/);
 
 ##
 # Prototypes
@@ -319,13 +409,11 @@ sub cgi ($);
 sub check_db ($);
 sub dbh ($);
 sub display ($%);
-sub editable ();
 sub expand ($%);
 sub finaltextout ($%);
 sub object ($%);
 sub odb ($);
 sub parse ($%);
-sub parse_args ($);
 sub siteconfig ($);
 sub textout ($%);
 
@@ -371,11 +459,11 @@ Example:
 
  $obj->display(path => "/bits/left-menu", ITEM => "main");
 
-For security reasons is also recommended to put all sub-templates into
-/bits/ directory under templates tree or into "bits" subdirectory of
-some tree inside of templates (like /admin/bits/admin-menu). Such
-templates cannot be displayed from XAO::Web handler by passing their path in
-URL.
+For security reasons it is also recommended to put all sub-templates
+into /bits/ directory under templates tree or into "bits" subdirectory
+of some tree inside of templates (like /admin/bits/admin-menu). Such
+templates cannot be displayed from XAO::Web handler by passing their
+path in URL.
 
 =cut
 
@@ -384,128 +472,143 @@ sub display ($%) {
     my $args=$self->{args}=get_args(\@_);
 
     ##
-    # Parsing template
+    # Parsing template or getting already pre-parsed template when it is
+    # available.
     #
-    my $page=$self->parse(path      => $args->{path},
-                          template  => $args->{template});
-    $page || return;
+    my $page=$self->parse($args);
 
     ##
     # Template processing itself. Pretty simple, huh? :)
     #
     foreach my $item (@{$page}) {
-        my $text=$item->{text};
 
-        ##
-        # <%End%> is special kind of object, processing stops where it is
-        # found. Suitable to cut off carriage return at the end of template
-        # and to put comments inside template.
-        #
-        last if !defined($text) && $item->{objname} eq 'End';
+        my $stop_after;
+        my $itemflag;
 
-        ##
-        # Trying to substitute from args if possible.
-        #
-        $text=$args->{$item->{objname}} unless defined($text);
+        my $text;
 
-        ##
-        # Executing object if not.
-        #
-        my $itemflag=$item->{flag};
-        if(!defined($text)) {
-            my $obj;
-        try {
-            $obj=$self->object(objname => $item->{objname});
+        if(exists $item->{text}) {
+            $text=$item->{text};
         }
-        catch XAO::E::Objects with {
-            my $e=shift;
-            if($args->{path}) {
-                eprint "Object loading error while processing path='$args->{path}'";
+
+        elsif(exists $item->{varname}) {
+            my $varname=$item->{varname};
+            $text=$args->{$varname};
+            defined $text ||
+                throw $self "display - undefined argument '$varname'";
+            $itemflag=$item->{flag};
+        }
+
+        elsif(exists $item->{objname}) {
+            my $objname=$item->{objname};
+
+            $itemflag=$item->{flag};
+
+            ##
+            # First we're trying to substitute from arguments
+            #
+            $text=$args->{$objname};
+
+            ##
+            # Executing object if not.
+            #
+            if(!defined $text) {
+                my $obj=$self->object(objname => $objname);
+            
+                ##
+                # Preparing arguments. If argument includes object references -
+                # they are expanded first.
+                #
+                my %objargs;
+                my $ia=$item->{args};
+                my $args_copy;
+                foreach my $a (keys %$ia) {
+                    my $v=$ia->{$a};
+                    if(ref($v)) {
+                        if(@$v==1 && exists($v->[0]->{text})) {
+                            $v=$v->[0]->{text};
+                        }
+                        else {
+                            if(!$args_copy) {
+                                $args_copy=merge_refs($args);
+                                delete $args_copy->{path};
+                            }
+                            $args_copy->{template}=$v;
+                            $v=$self->expand($args_copy);
+                        }
+                    }
+
+                    ##
+                    # Decoding entities from arguments. Lt, gt, amp,
+                    # quot and &#DEC; are supported.
+                    #
+                    $v=~s/&lt;/</sg;
+                    $v=~s/&gt;/>/sg;
+                    $v=~s/&quot;/"/sg;
+                    $v=~s/&#(\d+);/chr($1)/sge;
+                    $v=~s/&amp;/&/sg;
+
+                    $objargs{$a}=$v;
+                }
+
+                ##
+                # Executing object. For speed optimisation we call object's
+                # display method directly if we're not going to do anything
+                # with the text anyway. This way we avoid push/pop and at
+                # least two extra memcpy's.
+                #
+                delete $self->{merge_args};
+                if($itemflag && $itemflag ne 't') {
+                    $text=$obj->expand(\%objargs);
+                }
+                else {
+                    $obj->display(\%objargs);
+                }
+
+                ##
+                # Indicator that we do not need to parse or display anything
+                # after that point.
+                #
+                $stop_after=$self->clipboard->get('_no_more_output');
+
+                ##
+                # Was it something like SetArg object? Merging changes in then.
+                #
+                if($self->{merge_args}) {
+                    @{$args}{keys %{$self->{merge_args}}}=values %{$self->{merge_args}};
+                }
             }
-            else {
-                eprint "Object loading error";
+        }
+
+        ##
+        # Safety conversion - q for query, h - for html, s - for nbsp'ced
+        # html, f - for tag fields, t - for text as is (default).
+        #
+        if(defined($text) && $itemflag && $itemflag ne 't') {
+            if($itemflag eq 'h') {
+                $text=XAO::Utils::t2ht($text)
             }
-            $e->throw;
-        };
+            elsif($itemflag eq 's') {
+                $text=(defined $text && length($text)) ? XAO::Utils::t2ht($text) : "&nbsp;";
+            }
+            elsif($itemflag eq 'q') {
+                $text=XAO::Utils::t2hq($text)
+            }
+            elsif($itemflag eq 'f') {
+                $text=XAO::Utils::t2hf($text)
+            }
+        }
 
         ##
-        # Preparing arguments. If argument includes object references -
-        # they are expanded first.
+        # Sending out the text
         #
-        my $objargs=$item->{args};
-        foreach my $a (keys %{$objargs})
-         { next unless $objargs->{$a} =~ /<\%.*\%>/s;
-           my %newargs=%{$args};
-           $newargs{template}=$objargs->{$a};
-           delete $newargs{path};
-           $objargs->{$a}=$self->expand(%newargs);
-         }
+        $self->textout($text) if defined($text);
 
         ##
-        # Now decoding entities from arguments. Lt, gt, amp, quot and
-        # &#DEC; are supported.
+        # Checking if this object required to stop processing
         #
-        map
-         { my $v=$objargs->{$_};
-           $v=~s/&lt;/</sg;
-           $v=~s/&gt;/>/sg;
-           $v=~s/&quot;/"/sg;
-           $v=~s/&#(\d+);/chr($1)/sge;
-           $v=~s/&amp;/&/sg;
-           $objargs->{$_}=$v;
-         } keys %{$objargs};
-
-        ##
-        # Executing object. For speed optimisation we call object's
-        # display method directly if we're not going to do anything with
-        # the text anyway. This way we avoid push/pop and two extra
-        # memcpy's.
-        #
-        delete $self->{merge_args};
-        if($itemflag && $itemflag ne 't')
-         { $text=$obj->expand($objargs);
-         }
-        else
-         { $obj->display($objargs);
-         }
-
-        ##
-        # Was it something like SetArg object? Merging changes in then.
-        #
-        if($self->{merge_args})
-         { @{$args}{keys %{$self->{merge_args}}}=values %{$self->{merge_args}};
-         }
-      }
-
-     ##
-     # Safety conversion - q for query, h - for html, s - for nbsp'ced
-     # html, f - for tag fields, t - for text as is (default).
-     #
-     if(defined($text) && $itemflag && $itemflag ne 't')
-      { if($itemflag eq 'h')
-         { $text=XAO::Utils::t2ht($text)
-         }
-        elsif($itemflag eq 's')
-         { $text=(defined $text && length($text)) ? XAO::Utils::t2ht($text) : "&nbsp;";
-         }
-        elsif($itemflag eq 'q')
-         { $text=XAO::Utils::t2hq($text)
-         }
-        elsif($itemflag eq 'f')
-         { $text=XAO::Utils::t2hf($text)
-         }
-      }
-
-     ##
-     # Sending out the text
-     #
-     $self->textout($text) if defined($text);
-
-     ##
-     # Checking if this object required to stop processing
-     #
-     last if $self->clipboard->get('_no_more_output');
-   }
+        last if $stop_after;
+    }
 }
 
 ###############################################################################
@@ -531,6 +634,109 @@ sub expand ($%) {
     XAO::PageSupport::push();
     $self->display(@_);
     XAO::PageSupport::pop();
+}
+
+###############################################################################
+
+=item parse ($%)
+
+Takes template from either 'path' or 'template' and parses it. If given
+the following template:
+
+    Text <%Object a=A b="B" c={<%C/f ca={CA}%>} d='D' e={'<$E$>'}%>
+
+It will return a reference to the array of the following structure:
+
+    [   {   text    => 'Text ',
+        },
+        {   objname => 'Object',
+            args    => {
+                a => [
+                    {   text    => 'A',
+                    },
+                ],
+                b => [
+                    {   text    => 'B',
+                    },
+                ],
+                c => [
+                    {   objname => 'C',
+                        flag    => 'f',
+                        args    => {
+                            ca => [
+                                {   text    => 'CA',
+                                },
+                            ],
+                        },
+                    },
+                ],
+                d => 'D',
+                e => '<$E$>',
+            },
+        },
+    ]
+
+Templates from disk files are cached for the lifetime of the process and
+are never re-parsed.
+
+Always returns with the correct array or throws an error.
+
+=cut
+
+my %parsed_cache;
+sub parse ($%) {
+    my $self=shift;
+    my $args=get_args(\@_);
+    my $sitename;
+
+    ##
+    # Getting template text
+    #
+    my $template;
+    my $unparsed=$args->{unparsed};
+    my $path;
+    if(defined($args->{template})) {
+        $template=$args->{template};
+        if(ref($template)) {
+            return $template;       # Pre-parsed as an argument of some upper class
+        }
+    }
+    else {
+        $path=$args->{path} ||
+            throw $self "parse - no 'path' and no 'template' given to a Page object";
+
+        $sitename=$self->{sitename} || get_current_project_name();
+
+        if(!$unparsed && exists $parsed_cache{$sitename}->{$path}) {
+            return $parsed_cache{$sitename}->{$path};
+        }
+
+        if($self->debug_check('show-path')) {
+            dprint $self->{objname}."::parse - path='$path'";
+        }
+
+        $template=XAO::Templates::get(path => $path);
+        defined($template) ||
+            throw $self "parse - no template found (path=$path)";
+    }
+
+    ##
+    # Checking if we do not need to parse that template.
+    #
+    if($unparsed) {
+        return [ { text => $template } ];
+    }
+
+    ##
+    # Parsing. If a scalar is returned it is an indicator of an error.
+    #
+    my $page=XAO::PageSupport::parse($template);
+    ref $page ||
+        throw $self "parse - $page";
+
+    $parsed_cache{$sitename}->{$path}=$page if $path;
+
+    return $page;
 }
 
 ###############################################################################
@@ -567,6 +773,10 @@ Example of getting Page object:
      my $obj=$self->object;
      $obj->display(template => '<%Date%>');
  }
+
+Or even:
+
+ $self->object->display(template => '<%Date%>');
 
 Getting FilloutForm object:
 
@@ -705,6 +915,21 @@ sub odb ($) {
 
 ###############################################################################
 
+=item cache (%)
+
+A shortcut that actually calls $self->siteconfig->cache. See the
+description of cache() in L<XAO::DO::Web::Config> for more details.
+
+=cut
+
+sub cache ($%) {
+    my $self=shift;
+    my $args=get_args(\@_);
+    return $self->siteconfig->cache($args);
+}
+
+###############################################################################
+
 =item cgi ()
 
 Returns CGI object reference (see L<CGI>) or throws an error if it is
@@ -824,386 +1049,13 @@ sub pageurl ($;%) {
 
 ###############################################################################
 
-=item merge_args (%)
-
-This is an utility method that joins together arguments from `newargs'
-hash with `oldargs' hash (newargs override objargs). Useful to pass
-arguments to sub-objects.
-
-Does not modify any argument hashes, creates new one instead and
-returns reference to it.
-
-Example -- setting new path and leaving all other arguments untouched:
-
- sub display ($%) {
-     my $self=shift;
-     my $args=get_args(\@_);
-     my $obj=$self->object;
-     $obj->display($self->merge_args(oldargs => $args,
-                                     newargs => { path => '/bits/new-path' }
-                                    ));
- }
-
-=cut
-
-sub merge_args ($%) {
-    my $self=shift;
-    eprint ref($self)."::merge_args - obsolete, use XAO::Utils::merge_refs";
-    my $args=get_args(\@_);
-    my $oldargs=$args->{oldargs};
-    my $newargs=$args->{newargs};
-    my %a;
-    map {
-        $a{$_}=$oldargs->{$_}
-    } keys %{$oldargs} if $oldargs;
-    map {
-        $a{$_}=$newargs->{$_} if defined($newargs->{$_})
-    } keys %{$newargs} if $newargs;
-    \%a;
-}
-
-###############################################################################
-# Parses given template and returns reference to array of the following
-# structure:
-#  [ { text => text }
-#  , { text => text }
-#  , { objname => object name
-#    , args => { object args }
-#    , objtext => unparsed object text
-#    , flag => text (h, q, f or t)
-#    }
-#  , { text => text }
-#  ]
-#
-### my %parsed_cache;
-sub parse ($%) {
-    my ($self,%args)=@_;
-    my $classname=ref $self || $self;
-    if(! keys %args) {
-        eprint "$classname : No arguments given";
-        return undef;
-    }
-
-    ##
-    # Getting template text
-    #
-    my $template;
-    if(defined($args{template})) {
-        $template=$args{template};
-    }
-    else {
-        my $path=$args{path} ||
-            throw $self "parse - No path given to a Page object";
-
-        if($self->debug_check('show-path')) {
-            dprint $self->{objname}."::parse - path='$path'";
-        }
-
-        #XXX# return $parsed_cache{$path} if exists($parsed_cache{$path});
-
-        $template=XAO::Templates::get(path => $path);
-        defined($template) ||
-            throw $self "parse - no template found (path=$path)";
-    }
-
-    ##
-    # Checking if we do not need to parse that template.
-    #
-    if($self->{args}->{unparsed}) {
-        return [ { text => $template } ];
-    }
-
-    ##
-    # Parsing
-    #
-    my @page;
-    $template=~s/<!--(?!\/\/).*?-->//sg;
-    my @parts=split('(<%|%>|"|{|})',$template);
-    my $in_object=0;
-    my $in_quotes=0;
-    my $in_brackets=0;
-    my $objtext;
-    for(my $pnum=0; $pnum!=@parts; $pnum++) {
-        my $part=$parts[$pnum];
-        if($in_object) {
-            if($in_brackets) {
-                $objtext.=$part;
-                if($part eq '{') {
-                    $in_brackets++;
-                }
-                elsif($part eq '}') {
-                    $in_brackets--;
-                }
-            }
-            elsif($part eq '"') {
-                $objtext.='"';
-                if($in_quotes) {
-                    $in_quotes=0;
-                }
-                else {
-                    $in_quotes=1;
-                }
-            }
-            elsif($in_quotes) {
-                $objtext.=$part;
-            }
-            elsif($part eq '{') {
-                $in_brackets++;
-                $objtext.='{';
-            }
-            elsif($part eq '<%') {
-                $in_object++;
-                $objtext.=$part;
-            }
-            elsif($part eq '%>') {
-                $in_object--;
-                if(!$in_object) {
-                    push(@page,{ objtext => $objtext });
-                }
-                else {
-                    $objtext.=$part;
-                }
-            }
-            else {
-                $objtext.=$part;
-            }
-        }
-        else {
-            if($part eq '<%') {
-                $in_object++;
-                $objtext='';
-            }
-            else {
-                push(@page,{ text => $part });
-            }
-        }
-    }
-
-    $in_object && throw $self 'display - not closed object in template';
-
-    foreach my $item (@page) {
-        next unless defined($item->{objtext});
-        if($item->{objtext} !~ /^\s*(\w[\w\.:]*)(\/(\w+))?\s*(.*)$/s) {
-            $item->{text}='<%';	# <%%> is just a funny way to embed <%
-            delete $item->{objtext};
-            next;
-        }
-        $item->{objname}=$1;
-        $item->{flag}=$3 ? $item->{flag}=lc(substr($3,0,1)) : 't';
-        $item->{args}=parse_args($4);
-    }
-
-    ##
-    # Document structure
-    #
-    ## for(my $i=0; $i!=@page; $i++)
-    ##  { dprint "$i) ",join(",",%{$page[$i]}),"\n";
-    ##    if($page[$i]->{args})
-    ##     { my $args=$page[$i]->{args};
-    ##       foreach my $a (sort keys %{$args})
-    ##        { dprint "   $a => $args->{$a}\n";
-    ##        }
-    ##     }
-    ##  }
-
-    ## XXX - Cache have to be much more elaborate, the same template can
-    ## be parsed into different things and we can't cache it without
-    ## content checks. Need to check if hashing by complete content is
-    ## faster then just re-parsing.
-    ## ##
-    ## # Storing into the cache if possible
-    ## #
-    ## $parsed_cache{$args{path}}=\@page unless defined($args{template});
-
-    \@page;
-}
-
-##
-# States for argument parser.
-#
-my $SPACE=0;
-my $GOT_NAME=1;
-my $GOT_EQUAL=2;
-my $AFTER_EQUAL=3;
-my $GOT_QUOTE=4;
-my $GOT_LCB=5;
-
-##
-# Pretty hairy subroutine - parsing arguments and values from text
-# string into hash reference.
-#
-# Example:
-#  $parse_args('a b=bb c="c c&quot;c" d={dd&#125; {" 123}}');
-#
-# will return:
-#  { a => 'on',
-#    b => 'bb',
-#    c => 'c c"c',
-#    d => 'dd} {" 123}'
-#  }
-#
-sub parse_args ($)
-{ my $str=$_[0];
-  return {} unless defined($str);
-  my @tokens=split(/("|=|{|}|\s)/s,$str.' ');
-  my %args;
-
-  my $state=$SPACE;
-  my $name='';
-  my $value='';
-  my $level=0;
-  foreach my $token (@tokens)
-   { if($state == $SPACE)
-      { $value='';
-        if($token =~ /^[a-z][\w.]*$/i)
-         { $name=$token;
-           $state=$GOT_NAME;
-         }
-        elsif($token eq '' || $token =~ /\s+/)
-         {
-         }
-        else
-         { eprint "Wrong argument name - $token";
-           return {};
-         }
-      }
-     elsif($state == $GOT_NAME)
-      { if($token eq '=')
-         { $state=$GOT_EQUAL;
-         }
-        elsif($token =~ /\s+/)
-         { $args{$name}='on';
-           $state=$SPACE;
-         }
-        else
-         { eprint "Syntax error 1 in arguments, token='$token'";
-           return {};
-         }
-      }
-     elsif($state == $GOT_EQUAL)
-      { if($token eq '')
-         { $state=$AFTER_EQUAL;
-         }
-        else
-         { $args{$name}=$token;
-           $state=$SPACE;
-         }
-      }
-     elsif($state == $AFTER_EQUAL)
-      { if($token =~ /\s+/)
-         { $args{$name}='';
-           $state=$SPACE;
-         }
-        elsif($token eq '"')
-         { $state=$GOT_QUOTE;
-         }
-        elsif($token eq '{')
-         { $state=$GOT_LCB;
-           $level++;
-         }
-        else
-         { eprint "Syntax error 2 in arguments, token='$token'";
-           return {};
-         }
-      }
-     elsif($state == $GOT_QUOTE)
-      { if($token eq '"')
-         { $args{$name}=$value;
-           $state=$SPACE;
-         }
-        else
-         { $value.=$token;
-         }
-      }
-     elsif($state == $GOT_LCB)
-      { if($token eq '{')
-         { $level++;
-           $value.=$token;
-         }
-        elsif($token eq '}')
-         { $level--;
-           if($level)
-            { $value.=$token;
-            }
-           else
-            { $args{$name}=$value;
-              $state=$SPACE;
-            }
-         }
-        else
-         { $value.=$token;
-         }
-      }
-     else
-      { eprint "Wow, got into unknown state!";
-      }
-   }
-  if($state != $SPACE)
-   { eprint "Syntax error in arguments, quote was not closed";
-     return {};
-   }
-  \%args;
-} 
-
-##
-# This is overriden in all editable objects. Default is "not editable".
-# XXX - unused.
-#
-sub editable () {
-    eprint "editable - should not be used any more";
-    return 0;
-}
-
-###############################################################################
-
-=item cache (%)
-
-Creates or retrieves a cache for use in various Page based
-objects. Arguments are directly passed to XAO::Cache's new() method (see
-L<XAO::Cache>) except for 'name' argument which is used to identify the
-requested cache.
-
-If a cache with that name was already initialized before it is not
-re-created, but previously created version is returned instead.
-
-Example:
-
- my $cache=$self->cache(
-     name        => 'fubar',
-     retrieve    => \&real_retrieve,
-     coords      => ['foo','bar'],
-     expire      => 60
- );
-
-=cut
-
-sub cache ($%) {
-    my $self=shift;
-    my $args=get_args(\@_);
-
-    my $name=$args->{name} ||
-        throw $self "cache - no 'name' argument";
-
-    my $cache_list=$self->siteconfig->get('cache_list');
-    if(! $cache_list) {
-        $cache_list={};
-        $self->siteconfig->put(cache_list => $cache_list);
-    }
-
-    my $cache=$cache_list->{$name};
-    if(! $cache) {
-        $cache=XAO::Cache->new($args);
-        $cache_list->{$name}=$cache;
-    }
-
-    return $cache;
-}
-
 sub debug_check ($$) {
     my $self=shift;
     my $type=shift;
     return $self->clipboard->get("debug/Web/Page/$type");
 }
+
+###############################################################################
 
 sub debug_set ($%) {
     my $self=shift;

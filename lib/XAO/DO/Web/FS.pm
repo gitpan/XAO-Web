@@ -108,6 +108,10 @@ separated by | (pipe character) and are listed in order of priority.
 This eliminates duplicate matches on a given field, just like
 SQL distinct.
 
+=item limit => 10
+
+Allows to limit the number of matches to a specified number.
+
 =item start_item => 40
 
 Number indicating the first query match to fetch.
@@ -180,7 +184,7 @@ use XAO::Errors qw(XAO::DO::Web::FS);
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: FS.pm,v 1.20 2002/02/21 01:57:57 alves Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: FS.pm,v 1.31 2002/09/13 23:36:09 am Exp $ =~ /(\d+\.\d+)/);
 
 ###############################################################################
 
@@ -326,6 +330,11 @@ described in get_object() method. Additional arguments are:
  path       path to the template that gets displayed with the
             given fields passed in all uppercase.
 
+ extra_sub  reference to a subroutine that creates additional
+            parameters for the template and returns them in
+            a hash reference. For use in derived class
+            methods.
+
 Example:
 
  <%FS mode="show-hash" uri="/Customers/c123" fields="firstname,lastname"
@@ -355,7 +364,6 @@ sub show_hash ($%) {
     }
 
     my %data=(
-        path        => $args->{path},
         ID          => $hash->container_key,
     );
     if(@fields) {
@@ -365,12 +373,19 @@ sub show_hash ($%) {
             $data{uc($fn)}=defined($t{$fn}) ? $t{$fn} : '';
         }
     }
-    $self->object->display(\%data);
+
+    if($args->{extra_sub}) {
+        my $extra=$args->{extra_sub}(object => $hash, data => \%data, args => $args);
+        $self->object->display(merge_refs($args,$extra,\%data));
+    }
+    else {
+        $self->object->display(merge_refs($args,\%data));
+    }
 }
 
 ###############################################################################
 
-=item show-list => show_list (%)
+=item 'show-list' => show_list (%)
 
 Displays an index for XAO::FS list. List location is the same as
 described in get_object() method. Additional arguments are:
@@ -408,7 +423,8 @@ sub show_list ($%) {
     my @fields;
     if($args->{fields}) {
         if($args->{fields} eq '*') {
-            @fields=$list->get_new->keys;
+            my $n=$list->get_new;
+            @fields=map { $n->describe($_)->{type} eq 'list' ? () : $_ } $n->keys;
         }
         else {
             @fields=split(/\W+/,$args->{fields});
@@ -418,7 +434,7 @@ sub show_list ($%) {
 
     my $page=$self->object;
 
-    if (!$number && ($args->{'default.path'} || $args->{'default.template'})) {
+    if (!$number && ($args->{'default.path'} || defined($args->{'default.template'}))) {
         $page->display(merge_refs($args,{
             path        => $args->{'default.path'},
             template    => $args->{'default.template'},
@@ -438,6 +454,11 @@ sub show_list ($%) {
                 ID          => $id,
                 NUMBER      => $number,
             );
+
+            if(defined($args->{current})) {
+                $data{IS_CURRENT}=($args->{current} eq $id) ? 1 : 0;
+            }
+
             if(@fields) {
                 my %t;
                 @t{@fields}=$list->get($id)->get(@fields);
@@ -484,6 +505,7 @@ sub show_property ($%) {
 }
 
 ###############################################################################
+
 sub search ($;%) {
 
     my $self=shift;
@@ -574,12 +596,12 @@ sub search ($;%) {
     my $page     = $self->object(objname => 'Page');
     my $basetype = '';
 
-    if (!$total && ($args->{'default.path'} || $args->{'default.template'})) {
+    if (!$total && ($args->{'default.path'} || defined($args->{'default.template'}))) {
         #
         # Display default if appropriate
         #
         my $default = '';
-        if ($args->{'default.template'}) {
+        if(defined($args->{'default.template'})) {
             $basetype = 'template';
             $default  = $args->{'default.template'};
         }
@@ -601,30 +623,15 @@ sub search ($;%) {
         );
     }
     else {
-        #
-        # Display header
-        #
-        my $header = '';
-        if    ($args->{'header.template'}) {
-            $basetype = 'template';
-            $header   = $args->{'header.template'};
-        }
-        elsif ($args->{'header.path'}) {
-            $basetype = 'path';
-            $header   = $args->{'header.path'};
-        }
-        $page->display(
-            merge_refs(
-                $args,
-                {
-                    $basetype      => $header,
-                    START_ITEM     => $start_item,
-                    ITEMS_PER_PAGE => $items_per_page,
-                    TOTAL_ITEMS    => $total,
-                    LIMIT_REACHED  => $limit_reached,
-                }
-            )
-        ) if $header;
+        
+        $page->display(merge_refs($args, {
+            template        => $args->{'header.template'},
+            path            => $args->{'header.path'},
+            START_ITEM      => $start_item,
+            ITEMS_PER_PAGE  => $items_per_page,
+            TOTAL_ITEMS     => $total,
+            LIMIT_REACHED   => $limit_reached,
+        })) if $args->{'header.path'} || $args->{'header.template'};
 
         #
         # Display items
@@ -632,62 +639,55 @@ sub search ($;%) {
         my @fields;
         if($args->{fields}) {
             if($args->{fields} eq '*') {
-                @fields=$list->get_new->keys;
+                my $n=$list->get_new;
+                @fields=map { $n->describe($_)->{type} eq 'list' ? () : $_ } $n->keys;
             }
             else {
                 @fields=split(/\W+/,$args->{fields});
                 shift @fields unless length($fields[0]);
             }
         }
+        my @ucfields=map { uc($_) } @fields;
 
-        my $count = 1;
-        $basetype = $args->{template} ? 'template' : 'path';
-        #dprint "\n*** Search Results *" . scalar(@$ra_ids) . " matches*";
-        #dprint "    (use $basetype: $args->{$basetype})" if $basetype eq 'path';
+        my $have_sep=($args->{'separator.path'} || $args->{'separator.template'});
+
+        my $count=1;
+        my $pass=merge_refs($args);
         foreach my $id (@$ra_ids) {
-            #dprint "    $count> show $id";
-            my %pass = (
-                $basetype   => $args->{$basetype},
-                ID          => $id,
-                COUNT       => $count,
-                MATCH_NUMBER => $count + ($start_item-1),
-            );
-            if ($args->{fields}) {
-                my $item = $list->get($id);
-                foreach (@fields) {
-                    my $uckey = uc($_);
-                    $pass{$uckey} = $item->get($_) unless $pass{$uckey};
-                    $pass{$uckey} = '' unless defined $pass{$uckey};
-                }
+            @{$pass}{qw(ID COUNT MATCH_NUMBER)}=
+                ($id,$count,$count+($start_item-1));
+
+            if(@fields) {
+                my $item=$list->get($id);
+                @{$pass}{@ucfields}=$item->get(@fields);
             }
-            $page->display(merge_refs($args,\%pass));
+            $page->display($pass);
+
+            ##
+            # Displaying separator if given.
+            #
+            if($have_sep && $count < scalar(@$ra_ids)) {
+                $page->display(merge_refs($pass,{
+                    path        => $args->{'separator.path'},
+                    template    => $args->{'separator.template'},
+                }));
+            }
+
+            #dprint "count=$count time=".time unless $count%100;
+            #last if $count>10000;
+        }
+        continue {
             $count++;
         }
 
-        #
-        # Display footer
-        #
-        my $footer = '';
-        if ($args->{'footer.template'}) {
-            $basetype = 'template';
-            $footer   = $args->{'footer.template'};
-        }
-        elsif ($args->{'footer.path'}) {
-            $basetype = 'path';
-            $footer   = $args->{'footer.path'};
-        }
-        $page->display(
-            merge_refs(
-                $args,
-                {
-                    $basetype      => $footer,
-                    START_ITEM     => $start_item,
-                    ITEMS_PER_PAGE => $items_per_page,
-                    TOTAL_ITEMS    => $total,
-                    LIMIT_REACHED  => $limit_reached,
-                }
-           )
-        ) if $footer;
+        $page->display(merge_refs($args, {
+            template        => $args->{'footer.template'},
+            path            => $args->{'footer.path'},
+            START_ITEM      => $start_item,
+            ITEMS_PER_PAGE  => $items_per_page,
+            TOTAL_ITEMS     => $total,
+            LIMIT_REACHED   => $limit_reached,
+        })) if $args->{'footer.path'} || $args->{'footer.template'};
     }   
 }
 ###############################################################################
@@ -836,7 +836,7 @@ sub _create_query {
     #
     # Add any extra search options
     #
-    if ($args->{orderby} || $args->{distict}) {
+    if ($args->{orderby} || $args->{distinct} || $args->{limit}) {
         my $rh_options = {};
 
         #
@@ -855,7 +855,12 @@ sub _create_query {
         #
         # Distinct searching
         #
-        $rh_options->{distinct} = $args->{distict} if $args->{distict};
+        $rh_options->{distinct} = $args->{distinct} if $args->{distinct};
+
+        #
+        # Limit on total amount of results
+        #
+        $rh_options->{limit} = $args->{limit} if $args->{limit};
 
         push @{$expr_ra[$i]}, $rh_options;
     }
@@ -919,7 +924,9 @@ sub delete_object ($%) {
     my $id=$args->{id} || throw $self "delete_object - no 'id'";
     $list->delete($id);
 }
+
 ###############################################################################
+
 sub edit_object ($%) {
     my $self=shift;
     my $args=get_args(\@_);
@@ -955,44 +962,50 @@ sub edit_object ($%) {
         values      => \%values,
         submit_name => $id ? 'done' : undef,
         check_form  => sub {
-                           my $form = shift;
-                           foreach my $fieldname (@unique_fields) {
-                               my $results = $list->search(
-                                                 $fieldname,
-                                                 'eq',
-                                                 $form->field_desc($fieldname)->{value}
-                                             );
-                               if(($id && @$results>1) || (!$id && @$results)) {
-                                   my $field_text = 'Unique Identifier';
-                                   foreach my $fdata (@fields) {
-                                       if ($fdata->{name} eq $fieldname) {
-                                           $field_text = $fdata->{text};
-                                           last;
-                                       }
-                                   }
-                                   return "This '$field_text' is already taken";
-                               }
-                           }
-                           return '';
-                       },
+            my $form = shift;
+            foreach my $fieldname (@unique_fields) {
+                my $results = $list->search(
+                                    $fieldname,
+                                    'eq',
+                                    $form->field_desc($fieldname)->{value}
+                              );
+                if(($id && @$results>1) || (!$id && @$results)) {
+                    my $field_text = 'Unique Identifier';
+                    foreach my $fdata (@fields) {
+                        if ($fdata->{name} eq $fieldname) {
+                            $field_text = $fdata->{text};
+                            last;
+                        }
+                    }
+                    return "This '$field_text' is already taken";
+                }
+            }
+            return '';
+        },
         form_ok     => sub {
-                           my $form   = shift;
-                           my $object = $id ? $list->get($id) : $list->get_new();
-                           foreach my $name (map { $_->{name} } @fields) {
-                              #next if (field not in form)
-                               my $fdata = $form->field_desc($name);
-                               my $value = $fdata->{value};
-                               if ($fdata->{style} eq 'password') {
-                                   next unless $fdata->{pair};
-                                   $object->put($name => md5_base64($value));
-                               }
-                               else {
-                                   $object->put($name => $value);
-                               }
-                           }
-                           $id ? $list->put($id => $object) : $list->put($object);
-                           $self->object->display(path => $args->{'success.path'});
-                       },
+            my $form   = shift;
+            my $object = $id ? $list->get($id) : $list->get_new();
+            foreach my $name (map { $_->{name} } @fields) {
+                #next if (field not in form)
+                my $fdata = $form->field_desc($name);
+                my $value = $fdata->{value};
+                if ($fdata->{style} eq 'password') {
+                    next unless $fdata->{pair};
+                    if(!$fdata->{encrypt} || $fdata->{encrypt} eq 'md5') {
+                        $value=md5_base64($value);
+                    }
+                    elsif($fdata->{encrypt} eq 'plaintext') {
+                        # nothing
+                    }
+                    else {
+                        throw $self "edit_object - unknown encryption '$fdata->{encrypt}'";
+                    }
+                }
+                $object->put($name => $value);
+            }
+            $id ? $list->put($id => $object) : $list->put($object);
+            $self->object->display(path => $args->{'success.path'});
+        },
     );
     $form->display('form.path' => $args->{'form.path'});
 }

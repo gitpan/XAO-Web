@@ -1,3 +1,19 @@
+1.04 - 7-Nov-2002
+    * XAO::Page - new 5 times faster C parser is used
+    * XAO::PageSupport - new parser that supports '' and {''}
+    * XAO::Page - caching of parsed templates re-enabled
+    * Web::TextTable - an object for formatting plain text tables
+    * Web::IdentifyUser - calls login_check for external checks
+    * Web::Page - cache() method moved to Web::Config to make it
+      available for generic use from not Page based objects. Page has an
+      alias for compatibility.
+    * Web::Utility - 'show-pagedesc' fixed
+    * Web::Utility - 'number-ordinal-suffix' added
+    * XAO::Web - clipboard() method added
+    * XAO::Web - expand() method added
+    * Web::Clipboard - 'show' is now the default mode
+    * Web::Page - optimisation in template parsing
+
 1.03 - 18-Mar-2002
     * Web::Debug - new object
     * Web::Page - printing template paths can be enabled with

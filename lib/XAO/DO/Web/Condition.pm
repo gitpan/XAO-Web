@@ -84,7 +84,7 @@ use XAO::Objects;
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Condition.pm,v 1.5 2002/02/20 01:03:29 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Condition.pm,v 1.8 2002/06/25 23:00:47 am Exp $ =~ /(\d+\.\d+)/);
 
 sub display ($;%)
 { my $self=shift;
@@ -177,19 +177,19 @@ sub display ($;%)
     return unless %objargs;
 
     ##
-    # Now getting object and executing it.
+    # Now getting the object
     #
-    my $obj=$self->object(objname=>$objargs{objname} || "Page");
+    my $obj=$self->object(objname => $objargs{objname} || "Page");
     delete $objargs{objname};
 
     ##
     # If we were asked to pass complete set of arguments then merging.
     #
     if($args{"$name.pass"} && $self->{parent} && $self->{parent}->{args}) {
-        my %aaa=%{$self->{parent}->{args}};
-        delete $aaa{path};
-        delete $aaa{template};
-        $obj->display(merge_refs(\%aaa,\%objargs));
+        my $aaa=merge_refs($self->{parent}->{args});
+        delete $aaa->{path};
+        delete $aaa->{template};
+        $obj->display(merge_refs($aaa,\%objargs));
     }
     else {
         $obj->display(\%objargs);

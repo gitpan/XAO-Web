@@ -9,7 +9,8 @@ Currently is only useful in XAO::Web site context.
 =head1 DESCRIPTION
 
 Simple HTML header object. Accepts the following arguments, modifies
-them as appropriate and displays "/bits/page-header" template.
+them as appropriate and displays "/bits/page-header" template passing the
+rest of arguments unmodified.
 
 =over
 
@@ -87,7 +88,7 @@ use XAO::Objects;
 use base XAO::Objects->load(objname => 'Web::Page');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: Header.pm,v 1.2 2002/01/04 02:13:23 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: Header.pm,v 1.6 2002/11/09 02:22:15 am Exp $ =~ /(\d+\.\d+)/);
 
 ###############################################################################
 # Displaying HTML header.
@@ -101,13 +102,23 @@ sub display ($;%) {
         return;
     }
 
+    if($args->{'http.name'}) {
+        $self->siteconfig->header_args(
+            $args->{'http.name'}    => $args->{'http.value'} || ''
+        );
+        return;
+    }
+
     my $meta="";
     $meta.=qq(<META NAME="Keywords" CONTENT="$args->{keywords}">\n) if $args->{keywords};
     $meta.=qq(<META NAME="Description" CONTENT="$args->{description}">\n) if $args->{description};
-    $self->SUPER::display(path => $args->{path} || "/bits/page-header",
-                          TITLE => $args->{title} || "XAO::Web -- No Title",
-                          META=>$meta,
-                         );
+
+    $self->SUPER::display(merge_refs($args, {
+                            path        => $args->{path} || "/bits/page-header",
+                            TITLE       => $args->{title} || "XAO::Web -- No Title",
+                            GIVEN_TITLE => $args->{title} || '',
+                            META        => $meta,
+                         }));
 }
 
 ###############################################################################
