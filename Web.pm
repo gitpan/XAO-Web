@@ -14,7 +14,7 @@ use XAO::Errors qw(XAO::Web);
 # XAO::Web version number. Hand changed with every release!
 #
 use vars qw($VERSION);
-$VERSION='1.06';
+$VERSION='1.07';
 
 ###############################################################################
 
@@ -170,7 +170,9 @@ sub analyze ($$;$$) {
                     last;
                 }
                 elsif($type eq 'xaoweb') {
-                    throw XAO::E::Web "analyze - no objname/objargs for '$dir'";
+                    if(!$od->{'objname'}) {
+                        throw XAO::E::Web "analyze - no objname/objargs for '$dir'";
+                    }
                     $rhash=merge_refs($od);
                 }
                 elsif($allow_other_types) {
