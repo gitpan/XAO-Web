@@ -14,7 +14,7 @@ use XAO::Errors qw(XAO::Web);
 # XAO::Web version number. Hand changed with every release!
 #
 use vars qw($VERSION);
-$VERSION='1.02';
+$VERSION='1.03';
 
 ###############################################################################
 
@@ -84,6 +84,10 @@ init() method.
 When object initialization is completed the Config object is placed into
 XAO::Projects registry and is retrieved from there on next access to the
 same site in case of mod_perl.
+
+B<Note:> that means that if you are embedding a site specific version
+of an object during initialisation you need to pass 'sitename' into
+XAO::Objects' new() method.
 
 =head1 METHODS
 
@@ -276,7 +280,7 @@ sub execute ($%) {
     else {
         my $url=$siteconfig->get('base_url');
         $url=~/^http:/i ||
-            throw XAO::E::Web "Bad base_url ($url) for sitename=$sitename";
+            throw XAO::E::Web "execute - bad base_url ($url) for sitename=$sitename";
         my $nu=$url;
         chop($nu) while $nu =~ /\/$/;
         $siteconfig->put(base_url => $nu) if $nu ne $url;

@@ -12,12 +12,155 @@ XAO::DO::Web::FS - XAO::Web front end object for XAO::FS
       fields="*"
       header.path="/bits/foo-list-header"
       path="/bits/foo-list-row"
+      default.path="/bits/foo-list-default"
+ %>
+
+ <%FS mode="search"
+      uri="/Orders"
+      index_1="status"
+      value_1="submitted"
+      compare_1="wq"
+      expression="1"
+      orderby="place_time"
+      fields="*"
+      header.path="/bits/admin/order/list-header"
+      path="/bits/admin/order/list-row"
+      footer.path="/bits/admin/order/list-footer"
+      default.path="/bits/foo-list-default"
  %>
 
 =head1 DESCRIPTION
 
 Web::FS allows web site developer to directly access XAO Foundation
 Server from templates without implementing specific objects.
+
+=head1 SEARCH MODE
+
+Accepts the following arguments:
+
+=over
+
+=item uri => '/Customers'
+
+Database object path.
+
+=item index_1..N => 'first_name|last_name'
+
+Name of database field(s) to perform search on.
+Multiple field names are separated by | (pipe character)
+and treated as a logical 'or'.
+
+=item value_1..N => 'Ann|Lonnie'
+
+Keywords you want to search for in field(s) of corresponding index.
+Multiple sets of keywords are separated by | (pipe character)
+and treated as a logical 'or'.
+
+=item compare_1..N => 'ws'
+
+Comparison operator to be used in matching index to value.
+Supported comparison operators are:
+    eq  True if equal.
+    
+    ge  True if greater or equal.
+    
+    gt  True if greater.
+    
+    le  True if less or equal.
+    
+    lt  True if less.
+
+    ne  True if not equal.
+    
+    gtlt True if greater than             'a' and less than 'b'
+
+    gtle True if greater than             'a' and less than or equal to 'b'
+
+    gelt True if greater than or equal to 'a' and less than             'b'
+
+    gele True if greater than or equal to 'a' and less than or equal to 'b'
+    
+    wq  (word equal)True if contains given word completely.
+    
+    ws  (word start) True if contains word that starts with the given string.
+
+    cs  (contains string) True if contains string.
+
+=item expression => [ [ 1 and 2 ] and [ 3 or 4] ]
+
+Logical expression, as shown above, that indicates how to
+combine index/value pairs.  Numbers are used to indicate
+expressions specified by corresponding index/value pairs
+and brackets are used so that only one logical operator
+(and, or) is contained within a pair of brackets.
+
+=item orderby => '+last_name|-first_name'
+
+Optional field to use for sorting output. If field name is preceded
+by - (minus sign), sorting will be done in descending order for that
+field, otherwise it will be done in ascending order. For consistency
+and clarity, a + (plus sign) may precede a field name to expicitly
+indicate sorting in ascending order.  Multiple fields to sort by are
+separated by | (pipe character) and are listed in order of priority.
+
+=item distinct => 'first_name'
+
+This eliminates duplicate matches on a given field, just like
+SQL distinct.
+
+=item start_item => 40
+
+Number indicating the first query match to fetch.
+
+=item items_per_page => 20
+
+Number indicating the maximum number of query matches to fetch.
+
+=back
+
+Example:
+
+ <%FS mode="search
+      uri="/Customers"
+      fields="*"
+
+      index_1="first_name|last_name"
+      value_1="Linda|Mary Ann|Steven"
+      compare_1="wq"
+
+      index_2="gender"
+      value_2="female"
+      compare_2="wq"
+
+      index_3="age"
+      value_3="21|30"
+      compare_3="gelt"
+
+      expression="[ [ 1 and 2 ] and 3 ]"
+      orderby="age|first_name+desc"
+      start_item="40"
+      items_per_page="20"
+
+      header.path="/bits/admin/order/list-header"
+      path="/bits/admin/order/list-row"
+      footer.path="/bits/admin/order/list-footer"
+      default.template="No matches found."
+ %>
+
+=head2 CONFIGURATION VALUES SUPPORTED IN SEARCH MODE
+
+=over
+
+=item default_search_args
+
+The value of this configuration value is a reference to a hash.
+In this hash each key is a database (object) path (name) whose
+corresponding value is a reference to a hash containing the
+default arguments for searching on the specified of data.
+These default arguments are added unless they are specified by
+input arguments.
+
+=back
 
 =head1 METHODS
 
@@ -31,12 +174,13 @@ XAO::FS data.
 ###############################################################################
 package XAO::DO::Web::FS;
 use strict;
+use Digest::MD5 qw(md5_base64);
 use XAO::Utils;
 use XAO::Errors qw(XAO::DO::Web::FS);
 use base XAO::Objects->load(objname => 'Web::Action');
 
 use vars qw($VERSION);
-($VERSION)=(q$Id: FS.pm,v 1.3 2001/12/13 04:58:18 am Exp $ =~ /(\d+\.\d+)/);
+($VERSION)=(q$Id: FS.pm,v 1.20 2002/02/21 01:57:57 alves Exp $ =~ /(\d+\.\d+)/);
 
 ###############################################################################
 
@@ -68,14 +212,14 @@ sub get_object ($%) {
 
     $object=$self->clipboard->get($cb_base) if $cb_base;
     !$object || ref($object) ||
-        throw XAO::E::DO::Web::FS "get_object - garbage in clipboard at '$cb_base'";
+        throw $self "get_object - garbage in clipboard at '$cb_base'";
     my $got_from_cb=$object;
     $object=$self->odb->fetch($db_base) if $db_base && !$object;
 
     if($cb_base) {
         $db_base || $object ||
-            throw XAO::E::DO::Web::FS "get_object - no object in clipboard and" .
-                                      " no base.database to retrieve it";
+            throw $self "get_object - no object in clipboard and" .
+                        " no base.database to retrieve it";
 
         ##
         # Caching object in clipboard if we have both base.clipboard and
@@ -92,16 +236,14 @@ sub get_object ($%) {
         ##
         # XXX - This should be done in FS
         #
-        foreach my $name (split(/\/+/,$uri)) {
-            $object=$object->get($name);
-        }
+        foreach my $name (split(/\/+/,$uri)) { $object=$object->get($name); }
     }
     elsif(defined($uri) && length($uri)) {
         $object=$self->odb->fetch($uri);
     }
 
     $cb_base || $db_base || $uri ||
-        throw XAO::E::DO::Web::FS "get_object - at least one location parameter must present";
+        throw $self "get_object - at least one location parameter must present";
 
     $object;
 }
@@ -124,20 +266,15 @@ sub check_mode ($%) {
     my $args=get_args(\@_);
     my $mode=$args->{mode} || 'show-property';
 
-    if($mode eq 'delete-property') {
-        $self->delete_property($args);
-    }
-    elsif($mode eq 'show-hash') {
-        $self->show_hash($args);
-    }
-    elsif($mode eq 'show-list') {
-        $self->show_list($args);
-    }
-    elsif($mode eq 'show-property') {
-        $self->show_property($args);
-    }
+    if   ($mode eq 'search')          { $self->search($args); }
+    elsif($mode eq 'delete-property') { $self->delete_property($args); }
+    elsif($mode eq 'show-hash')       { $self->show_hash($args); }
+    elsif($mode eq 'show-list')       { $self->show_list($args); }
+    elsif($mode eq 'show-property')   { $self->show_property($args); }
+    elsif($mode eq 'delete-object')   { $self->delete_object($args); }
+    elsif($mode eq 'edit-object')     { $self->edit_object($args); }
     else {
-        throw XAO::E::DO::Web::FS "check_mode - unknown mode '$mode'";
+        throw $self "check_mode - unknown mode '$mode'";
     }
 }
 
@@ -163,9 +300,9 @@ sub delete_property ($%) {
     my $args=get_args(\@_);
 
     my $name=$args->{name} ||
-        throw XAO::E::DO::Web::FS "delete_property - no 'name'";
+        throw $self "delete_property - no 'name'";
     $self->odb->_check_name($name) ||
-        throw XAO::E::DO::Web::FS "delete_property - bad name '$name'";
+        throw $self "delete_property - bad name '$name'";
 
     my $object=$self->get_object($args);
 
@@ -179,13 +316,24 @@ sub delete_property ($%) {
 Displays a XAO::FS hash derived object. Object location is the same as
 described in get_object() method. Additional arguments are:
 
- fields             comma or space separated list of fields that are
-                    to be retrieved from each object in the list and
-                    passed to the template. Field names are converted
-                    to all uppercase when passed to template. For
-                    convenience '*' means to pass all
-                    property names (lists be passed as empty strings).
- path               path that is displayed for each element of the list
+ fields     comma or space separated list of fields that are
+            to be retrieved from each object in the list and
+            passed to the template. Field names are converted
+            to all uppercase when passed to template. For
+            convenience '*' means to pass all
+            property names (lists be passed as empty strings).
+
+ path       path to the template that gets displayed with the
+            given fields passed in all uppercase.
+
+Example:
+
+ <%FS mode="show-hash" uri="/Customers/c123" fields="firstname,lastname"
+      path="/bits/customer-name"%>
+
+Where /bits/customer-name should be something like:
+
+ Customer Name: <%FIRSTNAME/h%> <%LASTNAME/h%>
 
 =cut
 
@@ -236,6 +384,9 @@ described in get_object() method. Additional arguments are:
  header.path        header template path
  path               path that is displayed for each element of the list
  footer.path        footer template path
+ default.path       default template path, shown instead of  header,
+                    path and footer in the case where there are no
+                    items in list
 
 Show_list() supplies 'NUMBER' argument to header and footer containing
 the number of elements in the list.
@@ -250,10 +401,10 @@ sub show_list ($%) {
     my $args=get_args(\@_);
 
     my $list=$self->get_object($args);
-    $list->objname eq 'FS::List' ||
-        throw XAO::E::DO::Web::FS "show_list - not a list";
+    $list->objname eq 'FS::List' || throw $self "show_list - not a list";
 
     my @keys=$list->keys;
+    my $number=scalar(@keys);
     my @fields;
     if($args->{fields}) {
         if($args->{fields} eq '*') {
@@ -266,31 +417,48 @@ sub show_list ($%) {
     }
 
     my $page=$self->object;
-    $page->display(
-        path    => $args->{'header.path'},
-        NUMBER  => scalar(@keys),
-    ) if $args->{'header.path'};
 
-    foreach my $id (@keys) {
-        my %data=(
-            path        => $args->{path},
-            ID          => $id,
-            NUMBER      => scalar(@keys),
-        );
-        if(@fields) {
-            my %t;
-            @t{@fields}=$list->get($id)->get(@fields);
-            foreach my $fn (@fields) {
-                $data{uc($fn)}=defined($t{$fn}) ? $t{$fn} : '';
-            }
-        }
-        $page->display(\%data);
+    if (!$number && ($args->{'default.path'} || $args->{'default.template'})) {
+        $page->display(merge_refs($args,{
+            path        => $args->{'default.path'},
+            template    => $args->{'default.template'},
+            NUMBER      => $number,
+        }));
     }
+    else {
+        $page->display(merge_refs($args,{
+            path        => $args->{'header.path'},
+            template    => $args->{'header.template'},
+            NUMBER      => $number,
+        })) if $args->{'header.path'} || $args->{'header.template'};
 
-    $page->display(
-        path    => $args->{'footer.path'},
-        NUMBER  => scalar(@keys),
-    ) if $args->{'footer.path'};
+        foreach my $id (@keys) {
+            my %data=(
+                path        => $args->{path},
+                ID          => $id,
+                NUMBER      => $number,
+            );
+            if(@fields) {
+                my %t;
+                @t{@fields}=$list->get($id)->get(@fields);
+                foreach my $fn (@fields) {
+                    $data{uc($fn)}=defined($t{$fn}) ? $t{$fn} : '';
+                }
+            }
+            $page->display(merge_refs($args,\%data));
+        }
+
+        $page->display(
+            merge_refs(
+                $args,
+                {
+                    path     => $args->{'footer.path'},
+                    template => $args->{'footer.template'},
+                    NUMBER   => $number,
+                }
+            )
+        ) if $args->{'footer.path'} || $args->{'footer.template'};
+    }
 }
 
 ###############################################################################
@@ -316,6 +484,528 @@ sub show_property ($%) {
 }
 
 ###############################################################################
+sub search ($;%) {
+
+    my $self=shift;
+
+    my $args = get_args(\@_);
+    my $rh_conf = $self->siteconfig;
+
+    if ($args->{debug}) {
+        &XAO::Utils::set_debug(1);
+        #dprint "\n\n*** XAO::DO::Web::FS::search DEBUG MODE ***\n\n";
+        #dprint '*** Original Arguments:';
+        #foreach (sort keys %$args) { dprint " arg> $_: $args->{$_}\n"; }
+        #dprint '';
+    }
+
+    #############
+    #
+    # PROCESS INPUT ARGUMENTS
+    #
+    #############
+
+    #$args->{uri} = $args->{db_list} unless $args->{uri};
+
+    #
+    # Add default arguments as specified in configuration
+    # unless there are input arguments to override them.
+    #
+    my $rh_defaults     = $rh_conf->{default_search_args};
+    my $rh_default_args = $rh_defaults->{$args->{uri}};
+    if (ref($rh_default_args) eq 'HASH') {
+        foreach (keys %$rh_default_args) {
+            next if defined $args->{$_};
+            $args->{$_}  = $rh_default_args->{$_};
+            #dprint "*** Add Default Argument: $_ = $rh_default_args->{$_}";
+        }
+    }
+
+    if ($args->{debug}) {
+        #dprint '*** Processed Parameters:';
+        #foreach (sort keys %$args) { dprint " arg> $_: $args->{$_}"; }
+        #dprint '';
+    }
+
+    #############
+    #
+    # DO SEARCH
+    #
+    #############
+
+    my $list = $self->get_object($args);
+    $list->objname eq 'FS::List' || throw $self "show_list - not a list";
+    #dprint "*** LIST: $list";
+
+    #dprint "*** Go Search...\n\n";
+    my $ra_query   = $self->_create_query($args, $rh_conf);
+    my $ra_all_ids = $list->search(@$ra_query);
+
+    my $last_item_idx  = $#{$ra_all_ids};
+    my $total          = scalar(@$ra_all_ids);
+    my $items_per_page = int($args->{items_per_page} || -1);
+    $items_per_page    = '' if $items_per_page < 1; # show all items in page
+    my $start_item     = int($args->{start_item} || 1);
+    $start_item        = 1 if $start_item < 1;
+    my $limit_reached  = $items_per_page && $total>$items_per_page;
+
+    my $ra_ids;
+    if ($items_per_page) {
+        my $start_idx = $start_item - 1;
+        my $stop_idx  = $start_idx + $items_per_page - 1;
+        $stop_idx     = $last_item_idx if $last_item_idx < $stop_idx;
+        $ra_ids       = [ @{$ra_all_ids}[$start_idx..$stop_idx] ];
+    }
+    else {
+        $ra_ids = $ra_all_ids;
+    }
+
+    #dprint "*** START_ITEM     = $start_item";
+    #dprint "*** ITEMS_PER_PAGE = $items_per_page";
+    #dprint "*** TOTAL_ITEMS    = $total";
+    #dprint "*** LIMIT_REACHED  = $limit_reached";
+
+    #############
+    #
+    # DISPLAY ITEMS
+    #
+    #############
+
+    my $page     = $self->object(objname => 'Page');
+    my $basetype = '';
+
+    if (!$total && ($args->{'default.path'} || $args->{'default.template'})) {
+        #
+        # Display default if appropriate
+        #
+        my $default = '';
+        if ($args->{'default.template'}) {
+            $basetype = 'template';
+            $default  = $args->{'default.template'};
+        }
+        elsif ($args->{'default.path'}) {
+            $basetype = 'path';
+            $default  = $args->{'default.path'};
+        }
+        $page->display(
+            merge_refs(
+                $args,
+                {
+                    $basetype      => $default,
+                    START_ITEM     => $start_item,
+                    ITEMS_PER_PAGE => $items_per_page,
+                    TOTAL_ITEMS    => $total,
+                    LIMIT_REACHED  => $limit_reached,
+                }
+            )
+        );
+    }
+    else {
+        #
+        # Display header
+        #
+        my $header = '';
+        if    ($args->{'header.template'}) {
+            $basetype = 'template';
+            $header   = $args->{'header.template'};
+        }
+        elsif ($args->{'header.path'}) {
+            $basetype = 'path';
+            $header   = $args->{'header.path'};
+        }
+        $page->display(
+            merge_refs(
+                $args,
+                {
+                    $basetype      => $header,
+                    START_ITEM     => $start_item,
+                    ITEMS_PER_PAGE => $items_per_page,
+                    TOTAL_ITEMS    => $total,
+                    LIMIT_REACHED  => $limit_reached,
+                }
+            )
+        ) if $header;
+
+        #
+        # Display items
+        #
+        my @fields;
+        if($args->{fields}) {
+            if($args->{fields} eq '*') {
+                @fields=$list->get_new->keys;
+            }
+            else {
+                @fields=split(/\W+/,$args->{fields});
+                shift @fields unless length($fields[0]);
+            }
+        }
+
+        my $count = 1;
+        $basetype = $args->{template} ? 'template' : 'path';
+        #dprint "\n*** Search Results *" . scalar(@$ra_ids) . " matches*";
+        #dprint "    (use $basetype: $args->{$basetype})" if $basetype eq 'path';
+        foreach my $id (@$ra_ids) {
+            #dprint "    $count> show $id";
+            my %pass = (
+                $basetype   => $args->{$basetype},
+                ID          => $id,
+                COUNT       => $count,
+                MATCH_NUMBER => $count + ($start_item-1),
+            );
+            if ($args->{fields}) {
+                my $item = $list->get($id);
+                foreach (@fields) {
+                    my $uckey = uc($_);
+                    $pass{$uckey} = $item->get($_) unless $pass{$uckey};
+                    $pass{$uckey} = '' unless defined $pass{$uckey};
+                }
+            }
+            $page->display(merge_refs($args,\%pass));
+            $count++;
+        }
+
+        #
+        # Display footer
+        #
+        my $footer = '';
+        if ($args->{'footer.template'}) {
+            $basetype = 'template';
+            $footer   = $args->{'footer.template'};
+        }
+        elsif ($args->{'footer.path'}) {
+            $basetype = 'path';
+            $footer   = $args->{'footer.path'};
+        }
+        $page->display(
+            merge_refs(
+                $args,
+                {
+                    $basetype      => $footer,
+                    START_ITEM     => $start_item,
+                    ITEMS_PER_PAGE => $items_per_page,
+                    TOTAL_ITEMS    => $total,
+                    LIMIT_REACHED  => $limit_reached,
+                }
+           )
+        ) if $footer;
+    }   
+}
+###############################################################################
+sub _create_query {
+
+    my $self=shift;
+
+    my ($args, $rh_conf) = @_;
+
+    #dprint "*** _create_query START";
+
+    my $i=1;
+    my @expr_ra;
+    while ($args->{"index_$i"}) {
+
+        my $index      = $args->{"index_$i"} =~ /\S+/
+                       ? $args->{"index_$i"}
+                       : throw $self "_create_query - condition $i missing index";
+        my $value      = exists $args->{"value_$i"}
+                       ? $args->{"value_$i"}
+                       : throw $self "_create_query - condition $i missing value";
+        my $compare_op = exists $args->{"compare_$i"} && $args->{"compare_$i"} =~ /\S+/
+                       ? $args->{"compare_$i"}
+                       : throw $self "_create_query - condition $i missing comparison operator";
+
+        #dprint "\n  ** $i **";
+        #dprint "  ## index:            $index";
+        #dprint "  ## value:            $value";
+        #dprint "  ## compare operator: $compare_op";
+
+        #
+        # Create ref to array w/ object expression for index/value pair
+        #
+        my @indexes = split(/\|/, $index);
+        if ($compare_op eq 'wq' || $compare_op eq 'ws') {
+            #if ($value =~ /\|/) {
+            #    my @value_list = split(/\|/, $value);
+            #    $value         = \@value_list;
+            #}
+            $expr_ra[$i]   = $self->_create_expression(\@indexes, $compare_op, $value);
+        }
+        elsif ($compare_op =~ /^(g[et])(l[et])$/) {
+            my ($lo, $hi) = split(/\|/, $value);
+            foreach (@indexes) {
+                my $ra_temp  = [ [$_, $1, $lo] and [$_, $2, $hi] ];
+                $expr_ra[$i] = ref($expr_ra[$i]) eq 'ARRAY'
+                             ? [$expr_ra[$i], 'or', $ra_temp] : $ra_temp;
+            }
+        }
+        else {
+            $expr_ra[$i] = $self->_create_expression(\@indexes, $compare_op, $value);
+        }
+        $i++;
+    }
+
+    #
+    # At this point we have a bunch of expressions (1..N) in @expr_ra
+    # that need to be put together as specified in the 'expression'
+    # argument.  If the 'expression' argument does not match the
+    # the format (described in documentation above) then the only
+    # expression used will be the first one provided.
+    #
+    #$i+=100;
+
+    my $expression =  lc($args->{expression} || '');
+    if ($expression) {
+        $expression =~ s/^\s+//;
+        $expression =~ s/\s+$//;
+        $expression =~ s/\[\s+/\[/g;
+        $expression =~ s/\s+\]/\]/g;
+        $expression =~ s/\s+/ /g;
+        $expression =~ s/(.+)/[$1]/ unless $expression =~ /^\[.+\]$/;
+    }
+    else {
+        if ($i == 2 && ref($expr_ra[1]) eq 'ARRAY') {
+            $expression = '[1]';
+        }
+        elsif ($i < 2) {
+            $expression = '';
+        }
+        else {
+            throw $self "_create_query - conditions present without expression";
+        }
+    }
+    #dprint "\n    ## EXPRESSION: '$expression'";
+
+    my $regex = '\[(\d+) ([andor]+) (\d+)\]'; #was: '\[\s*(\d+)\s+(\w+)\s+(\d+)\s*\]';
+    if ($expression =~ /$regex/) {
+        $self->_interpret_expression(
+            \@expr_ra,
+            \$expression,
+            \$i, $1, $2, $3,
+            $regex,
+        );
+        $i--;
+        ###########################################################################
+        sub _interpret_expression {
+            my $self = shift;
+            my ($ra_expr_ra, $r_expr, $r_i, $i1, $i2, $i3, $regex) = @_;
+            if ($i2 ne 'and' && $i2 ne 'or') {
+                throw $self "_create_query - syntax error [$i1 $i2 $i3]";
+            }
+            elsif (ref($ra_expr_ra->[$i1]) ne 'ARRAY') {
+                throw $self "_create_query - condition '$i1' in expression is not specified";
+            }
+            elsif (ref($ra_expr_ra->[$i3]) ne 'ARRAY') {
+                throw $self "_create_query - condition '$i3' in expression is not specified";
+            }
+            $ra_expr_ra->[$$r_i] = [ $ra_expr_ra->[$i1], $i2, $ra_expr_ra->[$i3] ];
+            #dprint "    ## $$r_i = '[$i1 $i2 $i3]'";
+            $$r_expr =~ s/\[$i1 $i2 $i3\]/$$r_i/; #was: s/\[\s*$i1\s+$i2\s+$i3\s*\]/$$r_i/;
+            #dprint "    ## new EXPRESSION: '$$r_expr' ($r_expr)";
+            ${$r_i}++;
+            $$r_expr = "[$$r_expr]" if $$r_expr =~ /^\d+ [andor]+ \d+$/;
+            unless ($$r_expr =~ /\[\d+ and \d+\]/
+                 || $$r_expr =~ /\[\d+ or \d+\]/
+                 || $$r_expr =~ /^\d+$/) {
+                throw $self "_create_query - syntax error";
+            }
+            return unless $$r_expr =~ /$regex/;
+            $self->_interpret_expression(
+                $ra_expr_ra,
+                $r_expr,
+                $r_i, $1, $2, $3,
+                $regex,
+            );
+        }
+        ###########################################################################
+    }
+    else {
+        #dprint "    ## NO REGEX";
+        if ($expression =~ /^\[(\d+)\]$/) {
+            unless (ref($expr_ra[$1]) eq 'ARRAY') {
+                throw $self "_create_query - condition '$1' not specified";
+            }
+            $expr_ra[$i] = $expr_ra[$1];
+        }
+        elsif (!$expression) {
+            $expr_ra[$i] = [];
+        }
+        else {
+            throw $self "_create_query - syntax error";
+        }
+    }
+
+    #
+    # Add any extra search options
+    #
+    if ($args->{orderby} || $args->{distict}) {
+        my $rh_options = {};
+
+        #
+        # Sort specifications
+        #
+        if ($args->{orderby}) {
+            my $ra_orderby = [];
+            foreach (split(/\|/, $args->{orderby})) {
+                my $direction = /^-/ ? 'descend' : 'ascend';
+                s/\W//g;
+                push @$ra_orderby, ($direction => $_);
+            }
+            $rh_options->{orderby} = $ra_orderby;
+        }
+
+        #
+        # Distinct searching
+        #
+        $rh_options->{distinct} = $args->{distict} if $args->{distict};
+
+        push @{$expr_ra[$i]}, $rh_options;
+    }
+
+    #dprint "\n    ## QUERY START ##"
+    #     . $self->_searcharray2str($expr_ra[$i], '')
+    #     . "\n    ## QUERY STOP  ##\n"
+    #     . "\n*** _create_query STOP\n\n";
+
+    $expr_ra[$i];
+}
+###############################################################################
+sub _create_expression {
+    my $self=shift;
+    my ($ra_indexes, $compare_op, $value) = @_;
+    my $ra_expr;
+    foreach my $index (@$ra_indexes) {
+        my $ra_temp = [$index, $compare_op, $value];
+        $ra_expr    = ref($ra_expr) eq 'ARRAY' ? [$ra_expr, 'or', $ra_temp] : $ra_temp;
+    }
+    $ra_expr;
+}
+###############################################################################
+sub _searcharray2str() {
+    my $self=shift;
+    my ($ra, $indent) = @_;
+    my $indent_new = $indent . ' ';
+    my $i=0;
+    my $innermost=1;
+    my $str= "\n" . $indent . "[";
+    foreach (@$ra) {
+        $str .= ' ';
+        if    (ref($_) eq 'ARRAY') {
+            $str .=  $self->_searcharray2str($_, $indent_new);
+        }
+        elsif (ref($_) eq 'HASH') {
+            $str .= '{ ';
+            foreach my $key (keys %$_) { $str .= qq!'$key' => '$_->{$key}', !; }
+            $str .= ' },';
+        }
+        else {
+            if (($i==1) && (/and/ or /or/)) {
+                $str      .= "\n$indent " if ($i==1) && (/and/ or /or/);
+                $innermost = 0;
+            }
+            $str .= "'$_',";
+        }
+        $i++;
+    }
+    $str .= ' ';
+    $str .= "\n$indent" unless $innermost;
+    $str .= ']';
+    $str .= ',' if $indent;
+    $str;
+}
+###############################################################################
+sub delete_object ($%) {
+    my $self=shift;
+    my $args=get_args(\@_);
+    my $list=$self->get_object($args);
+    my $id=$args->{id} || throw $self "delete_object - no 'id'";
+    $list->delete($id);
+}
+###############################################################################
+sub edit_object ($%) {
+    my $self=shift;
+    my $args=get_args(\@_);
+
+    my $list   = $self->get_object($args);
+    my @fields = @{$self->form_fields};
+
+    #
+    # If we have ID then we're editing this object
+    # otherwise we're creating a new one.
+    #
+    my $id = $args->{id} || '';
+    my %values;
+    if ($id) {
+        my @fnames_to_get;
+        foreach my $fdata (@fields) {
+          next if $fdata->{style} eq 'password';
+          push @fnames_to_get, $fdata->{name};
+        }
+        my $object=$list->get($id);
+        @values{@fnames_to_get}=$object->get(@fnames_to_get);
+    }
+
+    my @unique_fields;
+    foreach my $fdata (@fields) {
+        push @unique_fields, $fdata->{name} if exists($fdata->{unique})
+                                            && $fdata->{unique};
+    }
+
+    my $form = $self->object(objname => 'Web::FilloutForm');
+    $form->setup(
+        fields      => \@fields,
+        values      => \%values,
+        submit_name => $id ? 'done' : undef,
+        check_form  => sub {
+                           my $form = shift;
+                           foreach my $fieldname (@unique_fields) {
+                               my $results = $list->search(
+                                                 $fieldname,
+                                                 'eq',
+                                                 $form->field_desc($fieldname)->{value}
+                                             );
+                               if(($id && @$results>1) || (!$id && @$results)) {
+                                   my $field_text = 'Unique Identifier';
+                                   foreach my $fdata (@fields) {
+                                       if ($fdata->{name} eq $fieldname) {
+                                           $field_text = $fdata->{text};
+                                           last;
+                                       }
+                                   }
+                                   return "This '$field_text' is already taken";
+                               }
+                           }
+                           return '';
+                       },
+        form_ok     => sub {
+                           my $form   = shift;
+                           my $object = $id ? $list->get($id) : $list->get_new();
+                           foreach my $name (map { $_->{name} } @fields) {
+                              #next if (field not in form)
+                               my $fdata = $form->field_desc($name);
+                               my $value = $fdata->{value};
+                               if ($fdata->{style} eq 'password') {
+                                   next unless $fdata->{pair};
+                                   $object->put($name => md5_base64($value));
+                               }
+                               else {
+                                   $object->put($name => $value);
+                               }
+                           }
+                           $id ? $list->put($id => $object) : $list->put($object);
+                           $self->object->display(path => $args->{'success.path'});
+                       },
+    );
+    $form->display('form.path' => $args->{'form.path'});
+}
+###############################################################################
+#
+# This method should be overwritten to include form specs
+# since they depend on data structure.
+#
+sub form_fields {
+    my $self=shift;
+    return [ ];
+}
+###############################################################################
 1;
 __END__
 
@@ -329,9 +1019,9 @@ Nothing.
 
 =head1 AUTHOR
 
-Copyright (c) 2000-2001 XAO, Inc.
+Copyright (c) 2000-2002 XAO, Inc.
 
-Andrew Maltsev <am@xao.com>.
+Andrew Maltsev <am@xao.com>, Marcos Alves <alves@xao.com>.
 
 =head1 SEE ALSO
 
