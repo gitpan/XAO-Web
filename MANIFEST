@@ -1,0 +1,70 @@
+MANIFEST
+MANIFEST.SKIP
+TODO
+Makefile.PL
+Web.pm
+test.pl
+ --------------------------------- XAO::PageSupport
+PageSupport/Makefile.PL
+PageSupport/PageSupport.pm
+PageSupport/PageSupport.xs
+ --------------------------------- XAO::*
+lib/XAO/DO/Web/Action.pm
+lib/XAO/DO/Web/CgiParam.pm
+lib/XAO/DO/Web/Clipboard.pm
+lib/XAO/DO/Web/Cookie.pm
+lib/XAO/DO/Web/Condition.pm
+lib/XAO/DO/Web/Config.pm
+lib/XAO/DO/Web/Date.pm
+lib/XAO/DO/Web/Default.pm
+lib/XAO/DO/Web/FilloutForm.pm
+lib/XAO/DO/Web/Footer.pm
+lib/XAO/DO/Web/FS.pm
+lib/XAO/DO/Web/Header.pm
+lib/XAO/DO/Web/IdentifyAgent.pm
+lib/XAO/DO/Web/IdentifyUser.pm
+lib/XAO/DO/Web/Mailer.pm
+lib/XAO/DO/Web/MultiPageNav.pm
+lib/XAO/DO/Web/Page.pm
+lib/XAO/DO/Web/Redirect.pm
+lib/XAO/DO/Web/Search.pm
+lib/XAO/DO/Web/SetArg.pm
+lib/XAO/DO/Web/Styler.pm
+lib/XAO/DO/Web/Utility.pm
+lib/XAO/PluginUtils.pm
+lib/XAO/Templates.pm
+lib/XAO/Web/Intro.pod
+ --------------------------------- Handlers
+handlers/xao-apache.pl
+ --------------------------------- Standard Templates
+templates/bits/errors/file-not-found
+templates/bits/fillout-form/errstr
+templates/bits/fillout-form/html-checkbox
+templates/bits/fillout-form/html-text
+templates/bits/page-footer
+templates/bits/page-header
+templates/bits/styler/page-title
+templates/index.html
+ --------------------------------- Test Cases
+testcases/base.pm
+testcases/FS.pm
+testcases/Page.pm
+testcases/PageSupport.pm
+testcases/WebClipboard.pm
+testcases/WebCondition.pm
+testcases/WebConfig.pm
+testcases/WebFS.pm
+testcases/Web.pm
+testcases/WebSetArg.pm
+ --------------------------------- Test installation tree
+testcases/testroot/projects/test/objects/Config.pm
+testcases/testroot/projects/test/templates/bits/local-test
+testcases/testroot/projects/test/templates/local.txt
+testcases/testroot/projects/test/templates/index.html
+testcases/testroot/templates/bits/system-test
+testcases/testroot/templates/bits/WebCondition/text-default
+testcases/testroot/templates/bits/WebCondition/text-v2
+testcases/testroot/templates/bits/WebFS/hash
+testcases/testroot/templates/bits/WebFS/list-header
+testcases/testroot/templates/bits/WebFS/list-row
+testcases/testroot/templates/system.txt
