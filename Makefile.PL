@@ -111,8 +111,8 @@ WriteMakefile(
         'Digest::MD5'   => '2.13',
         'MIME::Lite'    => '2.117',
         'Error'         => '0.13',
-        'XAO::Base'     => '1.01',
-        'XAO::FS'       => '1.01',
+        'XAO::Base'     => '1.02',
+        'XAO::FS'       => '1.02',
     },
     'INSTALLBIN'	=> $homedir . '/bin',
     'INSTALLSCRIPT'	=> $homedir . '/handlers',
@@ -122,6 +122,11 @@ WriteMakefile(
 
 sub MY::postamble
 { <<EOT;
+
+config::	README
+
+README:	lib/XAO/Web/Intro.pod
+	pod2text lib/XAO/Web/Intro.pod > README
 
 install::
 	[ -d $homedir ] || mkdir $homedir && chmod 755 $homedir
